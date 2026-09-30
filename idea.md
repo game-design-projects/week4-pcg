@@ -1,6 +1,6 @@
 # Idea: Cave Diving (working title)
 
-Requirements and ideas for prototype 2 of the Week 4 PCG assignment. This is a separate game from prototype 1 (Late, on the `pcg-prototype` branch). This is not a spec: nothing here is implemented, and details (numbers, exact rules, exact checks) are left to be decided while building.
+Requirements and ideas for prototype 2 of the Week 4 PCG assignment. This is a separate game from prototype 1 (Late, on the `pcg-prototype` branch). This is not a spec. A first playable version now exists, and the [README](README.md) describes what it does; the ideas below that it does not cover are still open.
 
 ## Overview
 
@@ -49,23 +49,21 @@ The player is a solo cave diver in a generated, flooded cave. They follow a guid
   - `cave_concept_2.png`: top-down survey-style map (depth bands, guideline with markers, dashed jump, faint unexplored outlines).
   - `cave_sprite.png`: diver sprite sheet.
   - `cave_sprite2.png`: tiles, props, guideline pieces, silt and light effects, bubbles.
+  - `sprites/`: frames and props cut from the two sheets by `tools/cut_sprites.py`, for the game to use.
 - Direction: deep teal, ink blue and slate grey, with warm amber reserved for the guideline, its markers and the headlamp; a narrow light cone, drifting silt, no visible surface above.
-- The generated sprite grids are not pixel-aligned (frame spacing is uneven), so frames will need cutting and aligning in an editor. Whether the tiles join seamlessly has not been checked.
+- The generated sprite grids are not pixel-aligned (frame spacing is uneven), so frames are cut and aligned by script. The tiles do not join seamlessly on their own, so the game uses one rock tile blended to repeat.
 
 ## Checking generated dives
 
-Each generated dive should be checked to be winnable (a route to the goal and back exists within the air budget, and the player cannot get permanently trapped), and regenerated if not. The exact checks are to be worked out during implementation.
+Each generated dive should be checked to be winnable within the air budget, even when silted out on the way back, and regenerated if not.
 
 ## Open questions
 
-- Whether rot.js fits the cave shapes, or a hand-written generator is better. Untested.
-- How to make silt a fair mechanic without making the winnable check too hard to write.
-- Whether 2D top-down or a side cross-section reads better.
 - How long a dive should last in real time, and whether a session is one dive or a series.
 - Whether the difficulty measures we can compute match how hard a dive feels to players.
 - Whether telemetry and a leaderboard are worth including here.
 - Whether Jev can be called from a static page.
-- The cave diving terms and rules used above come from general knowledge and have not been checked against a source.
+- The cave diving terms and rules used above were checked against search excerpts of the sources listed in the README, not the full pages.
 
 ## References
 
