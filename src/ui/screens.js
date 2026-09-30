@@ -302,6 +302,7 @@
       });
     });
     const marginTxt = r.arrival === null ? 'You gave up and called in sick.' : onTime ? `${fmtDuration(r.margin)} early` : `${fmtDuration(-r.margin)} late`;
+    const analysis = budgetBlock(game, r);
     const s = r.stats;
     const stat = (k, v2) => h('div', { class: 'stat' }, h('span', { class: 'k' }, k), h('span', { class: 'v' }, v2));
     const bestArr = game.best ? game.best.arrival : day.par.arrival;
@@ -329,6 +330,7 @@
           stat('Pay today', `${r.earned >= 0 ? '+' : ''}¥${r.earned}${r.fine ? ` (fine ¥${r.fine})` : ''}${r.fares ? ` (fares ¥${r.fares})` : ''}`),
           week ? stat('Wage this week', `¥${game.week.wage}`) : null,
           chat)),
+      analysis,
       lb,
       h('div', { class: 'actions' },
         btn(nextLabel, () => game.nextDay(), 'primary', { dataset: { testid: 'next-day' } }),
@@ -342,6 +344,72 @@
           }
         }, 'ghost')),
       h('p', { class: 'fine' }, `Seed ${day.seed} · generator ${day.version} · ${r.policy} display`)));
+  }
+
+  /** Time in hand over the commute, from the deadline map, and where the day was lost. */
+  function budgetBlock(game, r) {
+    const tr = r.trace;
+    if (!tr || !tr.samples.length) return null;
+    const day = game.day;
+    const where = (x) => {
+      const st = stationById(day, x.st);
+      if (x.mode === 'train' && x.line) return `on ${x.line.replace('L', 'Line ')} near ${st.name.en}`;
+      const seg = day.interiors[x.st].segs[x.seg];
+      const lvl = seg.depth === 0 ? 'the street' : `B${seg.depth} ${seg.kind}`;
+      return `${st.name.zh} ${st.name.en} (${lvl})`;
+    };
+    let text;
+    if (tr.lostAt) {
+      text = h('p', { class: 'lost' }, h('b', {}, `The day was lost at ${fmtClock(tr.lostAt.t, true)}`), ` ${where(tr.lostAt)}: from that moment no route could make 09:00, even played perfectly.`);
+    } else {
+      let low = tr.samples[0];
+      for (const x of tr.samples) if (x.b < low.b) low = x;
+      text = h('p', { class: 'lost ok' }, h('b', {}, 'You never lost the day.'), ` Your tightest moment was ${fmtClock(low.t, true)}, with ${fmtDuration(low.b)} in hand.`);
+    }
+    const w = 560;
+    const hh = 110;
+    const { cv } = mapCanvas('budgetcv', w, hh, (ctx) => {
+      const xs = tr.samples;
+      const t0 = xs[0].t;
+      const t1 = xs[xs.length - 1].t;
+      const hi = Math.max(120, ...xs.map((x) => x.b));
+      const lo = Math.min(-60, Math.max(-600, ...xs.map((x) => Math.min(x.b, 0))));
+      const X = (t) => 10 + ((t - t0) / Math.max(1, t1 - t0)) * (w - 20);
+      const Y = (b) => 10 + ((hi - Math.max(lo, Math.min(hi, b))) / (hi - lo)) * (hh - 26);
+      ctx.fillStyle = '#10141b';
+      ctx.fillRect(0, 0, w, hh);
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(10, Y(0));
+      ctx.lineTo(w - 10, Y(0));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (const [sign, col] of [[1, 'rgba(48,164,108,0.45)'], [-1, 'rgba(229,72,77,0.5)']]) {
+        ctx.beginPath();
+        ctx.moveTo(X(xs[0].t), Y(0));
+        for (const x of xs) ctx.lineTo(X(x.t), Y(sign > 0 ? Math.max(0, x.b) : Math.min(0, x.b)));
+        ctx.lineTo(X(xs[xs.length - 1].t), Y(0));
+        ctx.closePath();
+        ctx.fillStyle = col;
+        ctx.fill();
+      }
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      xs.forEach((x, i) => (i ? ctx.lineTo(X(x.t), Y(x.b)) : ctx.moveTo(X(x.t), Y(x.b))));
+      ctx.stroke();
+      if (tr.lostAt) {
+        ctx.fillStyle = '#ff5b4d';
+        ctx.beginPath();
+        ctx.arc(X(tr.lostAt.t), Y(0), 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      L.gfx.text(ctx, fmtClock(t0), 10, hh - 4, { size: 10, color: '#8b95a3' });
+      L.gfx.text(ctx, fmtClock(t1), w - 10, hh - 4, { size: 10, color: '#8b95a3', align: 'right' });
+      L.gfx.text(ctx, 'time in hand', w / 2, hh - 4, { size: 10, color: '#8b95a3', align: 'center' });
+    });
+    return h('div', { class: 'budget' }, cv, text);
   }
 
   // ------------------------------------------------------------------ between days

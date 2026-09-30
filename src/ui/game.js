@@ -140,6 +140,7 @@
   function startPlay() {
     const day = game.day;
     game.sim = L.sim.createSim(day);
+    game.dm = L.analysis.deadlineMap(day); // latest time you can be anywhere and still clock in
     game.glances = game.policy.phoneGlances;
     game.toasts = [];
     game.acc = 0;
@@ -151,6 +152,7 @@
     game.paused = false;
     game.screen = 'play';
     game.startedAt = new Date().toISOString();
+    game.playStart = performance.now();
     L.screens.hideAll();
     snapCamera();
     toast(`${game.weekdayLabel()} — leave home, clock in by 09:00`, '#2b6de0', 3);
@@ -260,7 +262,13 @@
     const pay = r.how === 'office' ? DAILY_PAY - fine : 0;
     const fares = s.fares * FARE;
     const earned = pay - fares;
-    const excuse = r.late ? L.excuses.excuseFor(game.day, s) : null;
+    let trace = null;
+    try {
+      trace = L.analysis.trace(game.day, s.inputs, { dm: game.dm });
+    } catch (e) {
+      trace = null;
+    }
+    const excuse = r.late ? L.excuses.excuseFor(game.day, s, trace && trace.lostAt) : null;
     const result = {
       weekday: game.weekday,
       seed: game.day.seed,
@@ -273,6 +281,7 @@
       fine,
       fares,
       excuse,
+      trace,
       stats: s.stats,
       log: s.log,
       inputs: s.inputs,
@@ -282,6 +291,7 @@
       adjust: game.adjust || null,
     };
     game.lastResult = result;
+    game.playSeconds = (performance.now() - (game.playStart || performance.now())) / 1000;
     if (game.mode === 'week') {
       game.week.history.push({ weekday: game.weekday, margin: r.margin, arrival: r.arrival, earned, seed: game.day.seed });
       game.week.wage += earned;
@@ -330,6 +340,7 @@
     goBriefing();
   };
   game.retryDay = () => {
+    if (game.screen === 'play' && L.telemetry) L.telemetry.recordAbandon(game);
     if (game.mode === 'week') {
       // a retry replays the same seed but does not change the week's record
       game.mode = 'custom';
@@ -356,6 +367,10 @@
     return true;
   };
   game.toTitle = () => {
+    if (game.screen === 'play' && L.telemetry) {
+      game.playSeconds = (performance.now() - (game.playStart || performance.now())) / 1000;
+      L.telemetry.recordAbandon(game);
+    }
     game.screen = 'title';
     game.sim = null;
     L.screens.title(game);
@@ -590,6 +605,7 @@
       v.glances = game.glances;
       v.dayLabel = game.weekdayLabel();
       v.speed = game.speed || 1;
+      v.budget = policy.budgetMeter && game.dm && !alt ? L.analysis.budget(day, game.dm, s) : null;
       L.hud.render(ctx, v);
       if (v.phoneOpen) drawPhone(ctx, v);
     }

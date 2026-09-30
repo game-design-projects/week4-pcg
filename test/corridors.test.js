@@ -179,3 +179,38 @@ test('riding a train you can walk through the carriages to another door', () => 
   }
   assert.ok(different > 0);
 });
+
+test('a transfer ID check at the stairs makes you queue, then climb', () => {
+  let found = null;
+  for (let i = 0; i < 60 && !found; i++) {
+    const day = Late.day.generateDay(`STAIRCHECK-${i}`, Late.difficulty.paramsFor(4));
+    for (const c of day.checkpoints) {
+      const L = day.interiors[c.station].links[c.link];
+      if (L.axis === 'v' && L.kind === 'stairs') found = { day, c, L };
+    }
+  }
+  assert.ok(found, 'expected some Friday seed to put a checkpoint on transfer stairs');
+  const { day, c, L } = found;
+  const K = Late.sim.KEY;
+  const sim = Late.sim.createSim(day);
+  const s = sim.state;
+  s.st = day.network.stations.findIndex((q) => q.id === c.station);
+  const from = L.check.dir === 1 ? L.a : L.b;
+  const to = L.check.dir === 1 ? L.b : L.a;
+  s.seg = from.seg;
+  s.x = from.x;
+  const evs = sim.step(L.check.dir === 1 ? K.DOWN : K.UP);
+  assert.equal(s.mode, 'queue');
+  assert.ok(evs.some((e) => e.type === 'queue'));
+  const wait = s.timerTotal;
+  assert.ok(wait >= L.check.wmin - RULES.DT && wait <= L.check.wmax + RULES.DT);
+  let n = 0;
+  while (s.mode !== 'walk' && n < 5000) {
+    sim.step(0);
+    n += 1;
+  }
+  assert.equal(s.seg, to.seg);
+  assert.equal(s.x, to.x);
+  const stairs = (L.check.dir === 1 ? RULES.STAIRS_DOWN : RULES.STAIRS_UP) * L.levels;
+  assert.ok(Math.abs(n + 1 - (wait + stairs) / RULES.DT) <= 1, `took ${n + 1} ticks`);
+});

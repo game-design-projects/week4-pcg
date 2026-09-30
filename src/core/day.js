@@ -25,7 +25,7 @@
 })(typeof self !== 'undefined' ? self : this, function (R, RNG, NET, INT, TT, SOLVER, DIFF) {
   'use strict';
 
-  const GEN_VERSION = 'g2';
+  const GEN_VERSION = 'g3';
   const { RULES } = R;
   const NOMINAL = 8 * 3600; // time used while shaping the day, before the real start is known
   const graphs = new WeakMap();
@@ -57,8 +57,9 @@
     return { arrival: res.best[office], hops, stats: SOLVER.routeStats(day, graph, hops, t0) };
   }
 
-  function routeShapeOk(stats, P) {
-    if (stats.transfers < P.minTransfers || stats.transfers > P.maxTransfers) return 'transfers';
+  /** null if the route has the day's wanted shape; `extra` loosens the transfer ceiling after trouble is placed. */
+  function routeShapeOk(stats, P, extra = 0) {
+    if (stats.transfers < P.minTransfers || stats.transfers > P.maxTransfers + extra) return 'transfers';
     if (P.hubOnRoute && !stats.hubsVisited.length) return 'hub-off-route';
     if (stats.total < P.minTrip) return 'too-short';
     if (stats.total > P.maxTrip) return 'too-long';
@@ -108,48 +109,85 @@
     const placed = [];
     const { home } = endNodes(day, graph);
     for (let c = 0; c < P.checkpoints; c++) {
-      const r = bestRoute(day, graph, day.startTime);
-      if (!r) return placed;
+      const worst = bestRoute(day, graph, day.startTime);
+      if (!worst) return placed;
+      const typical = bestRoute(day, graph, day.startTime, 'mean');
       const ldOpen = humanDeadlines(day, graph, P)[home];
-      const cands = [];
-      for (let i = 1; i < r.hops.length; i++) {
-        const e = r.hops[i].how;
-        if (e.type !== 'link' || e.link.axis !== 'h' || e.link.check || e.link.closedUntil) continue;
-        const from = e.way === 'ab' ? e.link.a : e.link.b;
-        const to = e.way === 'ab' ? e.link.b : e.link.a;
-        const fk = segKind(day, e.st, from.seg);
-        const tk = segKind(day, e.st, to.seg);
-        let w = 0;
-        let label = 'ID check';
-        if (e.link.kind === 'gate' && fk === 'unpaid' && tk === 'paid') {
-          const I = day.interiors[day.network.stations[e.st].id];
-          w = I.splitGate === e.link.id ? 5 : 2;
-          label = I.splitGate === e.link.id ? 'Re-entry security' : 'Security check';
-        } else if (e.link.kind === 'joint' && fk !== 'unpaid') {
-          w = 3;
-          label = 'ID check';
+      // candidate spots on the worst-case route and on the route a typical
+      // commuter (average queues) takes; spots on both count double
+      const seen = new Map();
+      for (const [route, bonus] of [[worst, 1], [typical, 1]]) {
+        if (!route) continue;
+        for (let i = 1; i < route.hops.length; i++) {
+          const e = route.hops[i].how;
+          if (e.type !== 'link' || e.link.check || e.link.closedUntil) continue;
+          if (e.link.axis !== 'h' && (e.link.kind !== 'stairs' || e.link.exit)) continue;
+          const key = `${e.st}:${e.link.id}:${e.way}`;
+          if (seen.has(key)) {
+            seen.get(key).both += bonus;
+            continue;
+          }
+          const from = e.way === 'ab' ? e.link.a : e.link.b;
+          const to = e.way === 'ab' ? e.link.b : e.link.a;
+          const fk = segKind(day, e.st, from.seg);
+          const tk = segKind(day, e.st, to.seg);
+          let w = 0;
+          let label = 'ID check';
+          if (e.link.kind === 'gate' && fk === 'unpaid' && tk === 'paid') {
+            const I = day.interiors[day.network.stations[e.st].id];
+            w = I.splitGate === e.link.id ? 5 : 2;
+            label = I.splitGate === e.link.id ? 'Re-entry security' : 'Security check';
+          } else if (e.link.kind === 'joint' && fk !== 'unpaid') {
+            w = 3;
+            label = 'ID check';
+          } else if (e.link.kind === 'stairs' && fk !== 'unpaid' && tk !== 'unpaid') {
+            w = 1.5;
+            label = 'Transfer ID check';
+          }
+          if (w) seen.set(key, { e, label, st: e.st, w, both: 0 });
         }
-        if (!w) continue;
-        // how much earlier would you have to leave home if this spot were blocked?
-        e.link.closedUntil = Infinity;
-        const ldClosed = humanDeadlines(day, graph, P)[home];
-        delete e.link.closedUntil;
-        const avoid = ldClosed > -Infinity ? Math.max(0, ldOpen - ldClosed) : 3600;
-        cands.push({ e, label, st: e.st, avoid, w });
       }
+      const cands = [...seen.values()];
       if (!cands.length) return placed;
+      for (const cd of cands) {
+        // how much earlier would you have to leave home if this spot were blocked?
+        cd.e.link.closedUntil = Infinity;
+        const ldClosed = humanDeadlines(day, graph, P)[home];
+        delete cd.e.link.closedUntil;
+        cd.avoid = ldClosed > -Infinity ? Math.max(0, ldOpen - ldClosed) : 3600;
+      }
       const wmin = P.checkWait[0] + rng.int(0, 15);
       const wmax = Math.max(wmin + 30, P.checkWait[1] + rng.int(0, 45));
       // prefer spots a typical commuter would rather queue at than walk around
       const mean = (wmin + wmax) / 2;
       const hard = cands.filter((cd) => cd.avoid >= mean);
-      const pool = hard.length ? hard : cands;
-      const pick = rng.weighted(pool.map((cd) => [cd, cd.w * (1 + Math.min(cd.avoid, 600) / 60)]));
-      pick.e.link.check = { dir: pick.e.way === 'ab' ? 1 : -1, wmin, wmax, label: pick.label, id: placed.length };
-      placed.push({ station: day.network.stations[pick.st].id, link: pick.e.link.id, label: pick.label, wmin, wmax, avoid: Math.round(Math.min(pick.avoid, 3600)) });
-      const t = timeDay(day, graph, P);
-      if (t === null) return placed;
-      day.startTime = t;
+      let pool = (hard.length ? hard : cands).map((cd) => [cd, cd.w * (1 + cd.both) * (1 + Math.min(cd.avoid, 600) / 60)]);
+      // Try up to six candidates in weighted order. Keep the first that leaves
+      // the day's route shape intact AND is still met by a typical commuter
+      // once the day is re-timed; failing that, the first that keeps the shape.
+      let chosen = null;
+      let fallback = null;
+      for (let k = 0; k < 6 && pool.length && !chosen; k++) {
+        const pick = rng.weighted(pool);
+        pool = pool.filter(([cd]) => cd !== pick);
+        const L = pick.e.link;
+        L.check = { dir: pick.e.way === 'ab' ? 1 : -1, wmin, wmax, label: pick.label, id: placed.length };
+        const t = timeDay(day, graph, P);
+        // the day's shape is judged on the route a typical commuter takes
+        // (average queues); the worst-case route is only the guarantee
+        const typ = t === null ? null : bestRoute(day, graph, t, 'mean');
+        if (typ && !routeShapeOk(typ.stats, P, 1)) {
+          if (typ.stats.checks > 0) chosen = { pick, t };
+          else if (!fallback) fallback = { pick, t };
+        }
+        delete L.check;
+      }
+      const use = chosen || fallback;
+      if (!use) return placed;
+      const L = use.pick.e.link;
+      L.check = { dir: use.pick.e.way === 'ab' ? 1 : -1, wmin, wmax, label: use.pick.label, id: placed.length };
+      day.startTime = use.t;
+      placed.push({ station: day.network.stations[use.pick.st].id, link: L.id, label: use.pick.label, wmin, wmax, avoid: Math.round(Math.min(use.pick.avoid, 3600)) });
     }
     return placed;
   }
@@ -170,14 +208,15 @@
       for (const e of rng.shuffle(cands)) {
         const L = e.link;
         L.closedUntil = Infinity;
-        const again = bestRoute(day, graph, day.startTime);
         const trap = SOLVER.trapCheck(day, graph, home, office);
-        if (again && trap.ok && again.stats.total <= P.maxTrip) {
+        const t = trap.ok ? timeDay(day, graph, P) : null;
+        const again = t === null ? null : bestRoute(day, graph, t, 'mean');
+        // keep a closure only if the typical route still has (roughly) the wanted shape
+        if (again && !routeShapeOk(again.stats, P, 1)) {
           L.closure = L.kind === 'joint' ? 'Passage closed for works' : L.kind === 'escalator' ? 'Escalator out of service' : 'Stairs closed';
           placed.push({ station: day.network.stations[e.st].id, link: L.id, kind: L.kind, reason: L.closure, cost: again.arrival - r.arrival });
+          day.startTime = t;
           done = true;
-          const t = timeDay(day, graph, P);
-          if (t !== null) day.startTime = t;
           break;
         }
         delete L.closedUntil;
@@ -252,11 +291,12 @@
     if (tolerance < P.minSpare) return { reason: 'a human-paced commuter would have no time to spare' };
     const trap = SOLVER.trapCheck(day, graph, home, office);
     if (!trap.ok) return { reason: `trap (${trap.traps.length} dead-end places)` };
-    const shape = routeShapeOk(worst.stats, P);
+    const typicalRoute = bestRoute(day, graph, start, 'mean');
+    const shape = typicalRoute ? routeShapeOk(typicalRoute.stats, P, 1) : 'unreachable';
     if (shape) return { reason: `route shape after checkpoints: ${shape}` };
     if (day.checkpoints.length < P.checkpoints) return { reason: 'could not place every checkpoint' };
 
-    const typical = bestRoute(day, graph, start, 'mean');
+    const typical = typicalRoute;
     day.par = {
       arrival: worst.arrival,
       spare,

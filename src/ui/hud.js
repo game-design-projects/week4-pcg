@@ -143,10 +143,21 @@
     G.text(ctx, 'M map', rx - 44, 66, { size: 9, weight: 700, color: '#8b95a3' });
     if (v.policy.timetable === 'always') G.text(ctx, 'T times', rx - 110, 66, { size: 9, weight: 700, color: '#8b95a3' });
 
+    // ---- time in hand (easy days only): how late you could be here and still make 09:00
+    let ffY = 108;
+    if (v.budget !== null && v.budget !== undefined) {
+      const b = v.budget;
+      const ok = b >= 0;
+      const col = !ok ? '#e5484d' : b < 60 ? '#f5a524' : '#30a46c';
+      G.roundRect(ctx, 14, 106, 250, 30, 8, 'rgba(11,13,17,0.86)', col, 2);
+      const txt = !Number.isFinite(b) ? 'No route makes 09:00 from here' : ok ? `In hand ${Math.floor(b / 60)}:${String(Math.floor(b % 60)).padStart(2, '0')} · at perfect play` : `Lost by ${L.rules.fmtDuration(-b)} — keep going`;
+      G.text(ctx, txt, 26, 126, { size: 13, weight: 800, color: col });
+      ffY = 142;
+    }
     // ---- fast forward
     if (v.speed > 1.5) {
-      G.roundRect(ctx, 14, 108, 92, 26, 6, 'rgba(255,209,102,0.92)');
-      G.text(ctx, `⏩ ×${Math.round(v.speed)}`, 60, 126, { size: 14, weight: 800, align: 'center', color: '#1b1f25' });
+      G.roundRect(ctx, 14, ffY, 92, 26, 6, 'rgba(255,209,102,0.92)');
+      G.text(ctx, `⏩ ×${Math.round(v.speed)}`, 60, ffY + 18, { size: 14, weight: 800, align: 'center', color: '#1b1f25' });
     }
 
     // ---- context hint

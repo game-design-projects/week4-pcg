@@ -290,6 +290,11 @@ kbd {
 .bubble.me { justify-self: end; background: #3aa76d; color: #fff; border-bottom-right-radius: 4px; }
 .bubble.boss { justify-self: start; background: #2c3441; border-bottom-left-radius: 4px; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.budget { display: grid; grid-template-columns: minmax(0, 560px) 1fr; gap: 16px; align-items: center; margin-top: 14px; }
+.budgetcv { width: 100%; height: auto; border-radius: 10px; }
+.lost { margin: 0; font-size: 14px; line-height: 1.5; color: #ffb4ac; }
+.lost.ok { color: #b8f0cf; }
+@media (max-width: 860px) { .budget { grid-template-columns: 1fr; } }
 
 /* ------------------------------------------------------------ help / shop / week */
 

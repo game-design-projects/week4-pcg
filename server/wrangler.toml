@@ -1,0 +1,12 @@
+name = "late-telemetry"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Fill in after `npm run db:create` prints the id (see the project README).
+[[d1_databases]]
+binding = "DB"
+database_name = "late-telemetry"
+database_id = "REPLACE_WITH_THE_ID_FROM_wrangler_d1_create"
+
+# READ_TOKEN (for exporting sessions and moderating scores) is a secret:
+#   npx wrangler secret put READ_TOKEN

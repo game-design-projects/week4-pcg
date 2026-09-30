@@ -23,6 +23,8 @@
     wrongline: ['I got on Line {line} going the wrong way. Saw a lot of {station}.', 'I rode Line {line} to {station} by mistake. Nice station though.'],
     hub: ['{station} is a labyrinth. I think I saw a minotaur near exit {exit}.', '{station}. That is the whole excuse. You know what it is like.'],
     generic: ['the metro was being the metro.', 'my alarm, the lift, the train, the other train. In that order.'],
+    overslept: ['my alarm was set for 8 PM. Again.', 'I was up in time, I promise. I just stood outside my building thinking about the day.', 'the cat sat on my phone.'],
+    lostat: ['it all went wrong at {station} around {clock}. I checked.', 'by {clock} at {station} it was already over. I just did not know it yet.'],
   };
 
   const REPLIES = [
@@ -38,7 +40,7 @@
    * @param state the finished simulation state (state.log, state.stats, state.result)
    * @returns {{text: string, reply: string, cause: string}}
    */
-  function excuseFor(day, state) {
+  function excuseFor(day, state, lostAt) {
     const rng = RNG.makeRng(`excuse|${day.seed}|${state.tick}`);
     const name = (id) => {
       const s = day.network.stations.find((x) => x.id === id);
@@ -66,6 +68,11 @@
       causes.push(['hub', 60, { station: hub.name.en, exit: I.exits.length ? rng.pick(I.exits).letter : 'B' }]);
     }
     if (state.stats.blocked > 3) causes.push(['oneway', 30 + state.stats.blocked, { station: name(state.log.length ? state.log[0].st : day.home.station) }]);
+    if (lostAt) {
+      const home = lostAt.st === day.home.station && lostAt.seg === 0 && lostAt.mode === 'walk';
+      if (home) causes.push(['overslept', 1e6, {}]);
+      else causes.push(['lostat', 45, { station: name(lostAt.st), clock: R.fmtClock(lostAt.t) }]);
+    }
     causes.sort((a, b) => b[1] - a[1]);
     const [cause, , vars] = causes[0] || ['generic', 0, {}];
     const text = `${rng.pick(OPENERS)} ${fill(rng.pick(TEMPLATES[cause]), vars)} ${rng.pick(CLOSERS)}`;

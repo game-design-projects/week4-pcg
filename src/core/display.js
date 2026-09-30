@@ -1,9 +1,11 @@
 // Late — what the player is SHOWN each weekday. This is a display setting,
 // not part of the generator: the same generated day can be played with any
 // policy. Through the week the player gets less and less help:
-//   Mon  full map any time, a route hint, the timetable, every board works
+//   Mon  full map any time, a route hint, the timetable, every board works,
+//        and a live meter of how much time you still have in hand
 //   Tue  no route hint
-//   Wed  the phone map is rationed; escalator timers disappear; a few signs are stale
+//   Wed  the phone map is rationed; escalator timers and the time-in-hand
+//        meter disappear; a few signs are stale
 //   Thu  the map shows for a moment in the morning, then one glance; boards
 //        half broken; no exit hint; more stale signs
 //   Fri  a brief look at the map and nothing else: no phone, no timetable,
@@ -19,11 +21,11 @@
   'use strict';
 
   const POLICY = [
-    { day: 'Mon', briefingMap: true, briefingSeconds: 0, phoneGlances: Infinity, glanceSeconds: Infinity, routeHint: true, exitHint: true, timetable: 'always', boards: 1, signs: 1, staleSigns: 0, escalatorTimers: true, minimap: true, stripTransfers: true },
-    { day: 'Tue', briefingMap: true, briefingSeconds: 0, phoneGlances: Infinity, glanceSeconds: Infinity, routeHint: false, exitHint: true, timetable: 'always', boards: 1, signs: 1, staleSigns: 0, escalatorTimers: true, minimap: true, stripTransfers: true },
-    { day: 'Wed', briefingMap: true, briefingSeconds: 0, phoneGlances: 3, glanceSeconds: 8, routeHint: false, exitHint: true, timetable: 'briefing', boards: 0.85, signs: 0.9, staleSigns: 0.1, escalatorTimers: false, minimap: true, stripTransfers: true },
-    { day: 'Thu', briefingMap: true, briefingSeconds: 25, phoneGlances: 1, glanceSeconds: 6, routeHint: false, exitHint: false, timetable: 'briefing', boards: 0.5, signs: 0.8, staleSigns: 0.2, escalatorTimers: false, minimap: false, stripTransfers: true },
-    { day: 'Fri', briefingMap: true, briefingSeconds: 12, phoneGlances: 0, glanceSeconds: 0, routeHint: false, exitHint: false, timetable: 'none', boards: 0.2, signs: 0.6, staleSigns: 0.3, escalatorTimers: false, minimap: false, stripTransfers: false },
+    { day: 'Mon', briefingMap: true, briefingSeconds: 0, phoneGlances: Infinity, glanceSeconds: Infinity, routeHint: true, exitHint: true, timetable: 'always', boards: 1, signs: 1, staleSigns: 0, escalatorTimers: true, minimap: true, stripTransfers: true, budgetMeter: true },
+    { day: 'Tue', briefingMap: true, briefingSeconds: 0, phoneGlances: Infinity, glanceSeconds: Infinity, routeHint: false, exitHint: true, timetable: 'always', boards: 1, signs: 1, staleSigns: 0, escalatorTimers: true, minimap: true, stripTransfers: true, budgetMeter: true },
+    { day: 'Wed', briefingMap: true, briefingSeconds: 0, phoneGlances: 3, glanceSeconds: 8, routeHint: false, exitHint: true, timetable: 'briefing', boards: 0.85, signs: 0.9, staleSigns: 0.1, escalatorTimers: false, minimap: true, stripTransfers: true, budgetMeter: false },
+    { day: 'Thu', briefingMap: true, briefingSeconds: 25, phoneGlances: 1, glanceSeconds: 6, routeHint: false, exitHint: false, timetable: 'briefing', boards: 0.5, signs: 0.8, staleSigns: 0.2, escalatorTimers: false, minimap: false, stripTransfers: true, budgetMeter: false },
+    { day: 'Fri', briefingMap: true, briefingSeconds: 12, phoneGlances: 0, glanceSeconds: 0, routeHint: false, exitHint: false, timetable: 'none', boards: 0.2, signs: 0.6, staleSigns: 0.3, escalatorTimers: false, minimap: false, stripTransfers: false, budgetMeter: false },
   ];
 
   const AIDS = [
@@ -59,7 +61,8 @@
       p.signs * (1 - p.staleSigns) +
       (p.escalatorTimers ? 1 : 0) +
       (p.minimap ? 1 : 0) +
-      (p.stripTransfers ? 1 : 0)
+      (p.stripTransfers ? 1 : 0) +
+      (p.budgetMeter ? 1 : 0)
     );
   }
 

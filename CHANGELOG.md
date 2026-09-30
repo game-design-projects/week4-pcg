@@ -4,6 +4,51 @@ What changed in Late, and why. Versions after 0.1 come from the improvement loop
 generated days through the solver and the autopilot (`node tools/sweep.js`), look for days that
 are trivial, unfair or dull, change the generator or the rules, and measure again.
 
+## 0.3.0 — second loop: generate less waste, meet the checkpoints, explain lost days
+
+Same 40 seeds per weekday; report in [`docs/sweeps/0.3.md`](docs/sweeps/0.3.md).
+
+**Wasteful: whole days were thrown away over one checkpoint.** In 0.2 the most common reasons to discard an
+attempt were "the route no longer goes through the hub" and "wrong number of transfers" *after* checkpoints and
+closures were placed (67 of the discarded attempts), and Friday needed 2.5 attempts per day. Two causes: a
+checkpoint that bent the route was kept anyway, and the day's shape was judged on the worst-case route, which
+swerves away from any queue it can.
+→ Placements are now repaired instead: up to six candidate spots are tried, and one is only kept if the day
+still has its shape. The shape (hub on route, number of transfers, now allowed one more transfer after trouble
+is placed) is judged on the route a typical commuter takes with average queues; the worst-case route stays the
+winnability guarantee. Routes through stacked or cross-platform interchanges had almost nowhere to put a
+checkpoint, so a checkpoint can now also stand at the head or foot of transfer stairs ("Transfer ID check").
+Result: attempts per day 1.27 / 1.63 / 2.52 → 1.18 / 1.50 / 1.50 (Wed / Thu / Fri); Friday generation 111 → 100 ms
+median; the typical route goes through the hub on 100% of Wednesday–Friday days.
+
+**Trivial: some checkpoints were never met.** Candidate spots now come from both the worst-case route and the
+typical route, and a spot the typical commuter still passes after the day is re-timed is preferred.
+Result: checkpoints on the typical route 0.80 / 1.27 / 1.50 / 1.68 → 0.85 / 1.55 / 1.77 / 1.95 (Tue–Fri);
+days where nobody meets a checkpoint 15 → 8 of 160.
+
+**Unclear: a late day gave no reason.** The deadline map from 0.2 now also serves the player (a display
+feature, not the generator): on Monday and Tuesday a meter shows how much time you have in hand at perfect
+play, and after any day the result screen draws your time in hand over the whole commute and names the moment
+and place the day was lost ("The day was lost at 08:21:50 on Wanquan Avenue (the street)"). The excuse to the
+boss uses it too: lose the day before leaving your street and you "stood outside my building thinking about the
+day". The time-in-hand meter joins the information that disappears later in the week.
+
+**Measurement fixes.** The sweep now separates "reboards" (hopping off to change cars, the 0.1 exploit, still
+0%) from "turn-backs" (riding one stop the wrong way to come back, e.g. round a closed platform: 0–5% of days,
+kept as a legitimate trick). It also reports the route a typical commuter takes, not only the worst case.
+
+**Known and accepted.** 2 of 40 Friday days have a 6-second pinch point on the *fastest* route (a stair
+checkpoint right before a train). The hesitant human is still never late, because a safer route remains; we
+keep it as Friday flavour and watch it.
+
+**Also new: telemetry and the daily leaderboard** (the Week 3 pattern; `server/`). Opt-in on a first-run card,
+local-first storage with export, a random browser id and nothing else; a Cloudflare Worker + D1 collector that
+never reads IP, User-Agent or geo; and a daily-commute board where the Worker regenerates the day and replays
+the submitted key presses with the game's own simulation. Tested under `node --test` against real SQLite. Not
+deployed yet, so the game ships with both endpoints off and says so.
+
+Generator version `g2` → `g3`.
+
 ## 0.2.0 — first improvement loop
 
 Measured with `node tools/sweep.js` on the same 40 seeds per weekday (200 days). Full reports:

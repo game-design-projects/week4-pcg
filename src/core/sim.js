@@ -175,6 +175,17 @@
         ev.push({ type: 'lift-wait' });
         return true;
       }
+      if (isChecked(L, way)) {
+        // a transfer ID check at the stairs: queue first, then climb
+        s.mode = 'queue';
+        s.link = L;
+        s.way = way;
+        s.timerTotal = checkpointWait(L);
+        s.timer = s.timerTotal - RULES.DT;
+        ev.push({ type: 'queue', label: L.check.label, wait: s.timerTotal });
+        note('checkpoint', { label: L.check.label, wait: s.timerTotal });
+        return true;
+      }
       startTraverse(L, way, ev, RULES.DT);
       return true;
     }

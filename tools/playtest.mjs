@@ -28,6 +28,11 @@ const url = pathToFileURL(resolve(here, '..', 'index.html')).href;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
+const requests = [];
+page.on('request', (r) => {
+  const u = r.url();
+  if (!u.startsWith('file:') && !u.startsWith('data:') && !/fonts\.(googleapis|gstatic)\.com/.test(u)) requests.push(u);
+});
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 page.on('console', (m) => {
   if (m.type() === 'error' && !/fonts\.googleapis|fonts\.gstatic|ERR_CERT|ERR_NAME|ERR_INTERNET|net::/.test(m.text())) errors.push(`console: ${m.text()}`);
@@ -151,9 +156,22 @@ try {
   await page.goto(url);
   await waitScreen('title', 20000);
   await page.waitForTimeout(800);
+  // first run: the telemetry consent card is up; keep data on this device
+  if (await page.$('[data-testid="consent-decline"]')) {
+    await shot('consent');
+    await page.click('[data-testid="consent-decline"]');
+  }
   await shot('title');
   const results = [];
-  if (flag('--late')) {
+  if (flag('--daily')) {
+    await page.evaluate(() => window.__late.startDaily());
+    const r = await playDay('daily');
+    if (r.how !== 'office') throw new Error('expected to reach the office');
+    const lb = await page.evaluate(() => (document.querySelector('.lb') || {}).textContent || '');
+    console.log(`leaderboard block: ${lb.trim()}`);
+    if (!/not deployed/i.test(lb)) throw new Error('expected the leaderboard to say it is not deployed');
+    results.push(r);
+  } else if (flag('--late')) {
     await page.evaluate((seed) => window.__late.startCustom(seed, 1), seedArg);
     const r = await playDay('late', { dawdle: true });
     if (!r.late || !/LATE/.test(r.stamp)) throw new Error('expected a LATE result');
@@ -179,8 +197,12 @@ try {
       await shot('week-summary');
     }
   }
+  const tele = await page.evaluate(() => ({ consent: window.Late.telemetry.settings.consent, sessions: window.Late.telemetry.sessions.length, endpoint: window.Late.config.TELEMETRY_ENDPOINT }));
+  console.log(`telemetry: consent ${tele.consent}, ${tele.sessions} session(s) kept on this device, endpoint ${tele.endpoint}`);
+  if (tele.sessions < results.length) throw new Error('expected every played day to be recorded locally');
   if (errors.length) throw new Error(`page errors:\n${errors.join('\n')}`);
-  console.log(`PASS — ${results.length} day(s) played in the browser`);
+  if (requests.length) throw new Error(`unexpected network requests: ${requests.join(', ')}`);
+  console.log(`PASS — ${results.length} day(s) played in the browser, no data left the page`);
 } catch (e) {
   console.error('FAIL', e.message);
   if (errors.length) console.error(errors.join('\n'));

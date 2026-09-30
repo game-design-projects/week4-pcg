@@ -447,6 +447,15 @@
       ctx.restore();
       G.text(ctx, '停用 Closed', mx, my - 18, { size: 10, weight: 800, align: 'center', color: '#ffcf33', stroke: '#000', strokeWidth: 3 });
     }
+    if (L.check) {
+      // transfer ID check at the end you start from
+      const [cx, cy] = L.check.dir === 1 ? [ax, ay] : [bx, by];
+      const side = (L.check.dir === 1 ? bx - ax : ax - bx) > 0 ? -1 : 1;
+      G.sprite(ctx, 'guard_f', cx + side * 26, cy, { scale: 0.5 });
+      G.roundRect(ctx, cx - 50, cy - 92, 100, 18, 3, '#b3261e');
+      G.text(ctx, `查验 ${L.check.label}`, cx, cy - 79, { size: 10, weight: 800, align: 'center', family: 'cjk' });
+      for (let i = 0; i < 3; i++) G.sprite(ctx, i % 2 ? 'sil_1' : 'sil_3', cx + side * (44 + i * 12), cy - 2, { scale: 0.7, alpha: 0.85 });
+    }
     if (L.exit) {
       // street entrance canopy with the exit letter
       G.roundRect(ctx, ax - 22, ay - 64, 44, 30, 4, '#1d6b3c', '#0f3d22', 2);

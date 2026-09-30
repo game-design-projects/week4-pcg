@@ -17,4 +17,5 @@ module.exports = {
   display: require('./display.js'),
   wayfinding: require('./wayfinding.js'),
   excuses: require('./excuses.js'),
+  analysis: require('./analysis.js'),
 };

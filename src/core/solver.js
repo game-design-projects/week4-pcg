@@ -474,17 +474,24 @@
       if (how.type === 'link' && isChecked(how.link, how.way)) checks += 1;
       prevT = hops[i].t;
     }
-    // a transfer is a change of line; getting off and back on the same line
-    // (changing cars during a dwell, or turning back) is a "reboard"
+    // a transfer is a change of line. Getting off and back on the same line is
+    // either a "reboard" (same direction: hopping off to change cars) or a
+    // "turnback" (riding the wrong way to catch the right train, e.g. round a
+    // closed platform)
     const lines = [];
     let reboards = 0;
+    let turnbacks = 0;
+    let prevDir = null;
     rides.forEach((r, i) => {
       const s = services[r.service];
-      if (i > 0 && lines[lines.length - 1] === s.line) reboards += 1;
-      else {
+      if (i > 0 && lines[lines.length - 1] === s.line) {
+        if (s.dir === prevDir) reboards += 1;
+        else turnbacks += 1;
+      } else {
         if (i > 0) transferStations.push(s.stops[r.from]);
         lines.push(s.line);
       }
+      prevDir = s.dir;
     });
     const total = prevT - t0;
     const hubsVisited = transferStations.filter((id) => day.network.stations.find((s) => s.id === id).kind === 'hub');
@@ -496,6 +503,7 @@
       rides: rides.length,
       transfers: Math.max(0, lines.length - 1),
       reboards,
+      turnbacks,
       lines,
       transferStations,
       hubsVisited,
