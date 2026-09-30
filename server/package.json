@@ -1,0 +1,17 @@
+{
+  "name": "late-telemetry-worker",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker + D1 for Late: anonymous opt-in playtest telemetry and the server-replayed daily-commute leaderboard.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "db:create": "wrangler d1 create late-telemetry",
+    "db:migrate": "wrangler d1 execute late-telemetry --remote --file=./migrations/0001_init.sql",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
