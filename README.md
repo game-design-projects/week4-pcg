@@ -16,7 +16,7 @@ Build a game prototype that incorporates PCG: generate the levels, or something 
 
 The game is played over a five-day work week. Difficulty rises through the week by giving the player less information (a timetable shown once and then hidden, signs that go out of date) and by adding checkpoints.
 
-**Status:** design stage. There is no playable prototype yet. The full design is in [`spec.md`](spec.md).
+**Status:** design stage. There is no playable prototype yet. Requirements and ideas are in [`idea.md`](idea.md).
 
 ## How our PCG works
 
@@ -30,12 +30,7 @@ Every day starts from a seed and a difficulty vector (number of levels, number o
 
 From midweek on, the route also passes through a **hub station**: one where many lines meet and moving between them is awkward (long passages, one-way mazes, separate parts joined by a gate, or many levels). Hubs are generated from several linked blocks with an uneven transfer-cost table, instead of a single floor plan.
 
-A generated day is only accepted if it passes these checks; otherwise it is regenerated (with a retry limit and a fallback to a looser difficulty):
-
-- A route from home to office exists on the directed, time-expanded graph (one-way edges, escalator schedule, and train departures all included).
-- That route arrives with at least the required slack, so a perfect player is on time.
-- The route still works when every mandatory checkpoint takes its maximum wait.
-- No part of the network traps the player where they cannot reach the office.
+Each generated day is checked to be winnable (a perfect player can arrive on time with some spare time, and cannot get trapped) and is regenerated if not; the exact checks will be worked out during implementation.
 
 We also add a Director that adjusts disruption and checkpoint intensity from how the player has been doing. It changes parameters only and does not generate space.
 
@@ -44,8 +39,8 @@ Randomness comes from a seeded generator, so the same seed gives the same day.
 ## How PCG adds to our game
 
 - **Variety:** each day is a different network and timetable, so the player cannot memorize a route and has to read the situation.
-- **Controlled difficulty:** difficulty is a set of parameters rather than hand-ordered levels, and the slack guarantee shrinks through the week (Monday is forgiving, Friday is tight).
-- **Fairness:** because a perfect route is guaranteed to exist, being late is always the player's fault and never the generator's.
+- **Controlled difficulty:** difficulty is a set of parameters rather than hand-ordered levels, and the allowed spare time shrinks through the week (Monday is forgiving, Friday is tight).
+- **Fairness:** because each generated day is checked to be winnable, being late is meant to be the player's fault and never the generator's.
 - **Adaptivity:** the Director eases or tightens conditions based on recent performance.
 
 What is not procedural: the rules, the items, the art, and the text templates are hand-made. Hiding information from the player (the timetable shown once, out-of-date signs) is a difficulty setting in how the game is displayed, not generated content.
