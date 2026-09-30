@@ -177,7 +177,7 @@
   }
 
   /** Concourse at depth 1: unpaid | gates | paid | gates | unpaid, exits up to the street. */
-  function addConcourse(I, rng, P, block, bx) {
+  function addConcourse(I, rng, P, block, bx, busy) {
     const uL = rng.int(22, 30);
     const uR = rng.int(22, 30);
     const unpaidL = addSeg(I, { depth: 1, x0: bx, x1: bx + uL, kind: 'unpaid', block });
@@ -185,6 +185,16 @@
     const unpaidR = addSeg(I, { depth: 1, x0: bx + BLOCK_W - uR, x1: bx + BLOCK_W, kind: 'unpaid', block });
     const gateL = addHLink(I, 'gate', unpaidL, paid);
     const gateR = addHLink(I, 'gate', paid, unpaidR);
+    // rush hour: busy concourses run as two opposing lanes, and the halls by the
+    // exits carry the crowd coming in while you try to get out
+    const lanes = (seg, share) => {
+      if (!rng.chance(share)) return;
+      seg.flow = 'opposing';
+      seg.dir = rng.chance(P.keepLeftShare) ? -1 : 1;
+    };
+    if (busy) lanes(paid, P.concourseOpposingShare);
+    lanes(unpaidL, P.unpaidOpposingShare);
+    lanes(unpaidR, P.unpaidOpposingShare);
     // exits: stairs from each unpaid end up to the street (a few stations lose one side)
     const sides = rng.chance(0.15) ? [rng.pick([-1, 1])] : [-1, 1];
     for (const side of sides) {
@@ -234,7 +244,7 @@
    * spec.platforms: [{tracks}] top to bottom; spec.deep: extra hall levels above the first platform.
    */
   function addBlock(I, rng, P, index, bx, spec) {
-    const cc = addConcourse(I, rng, P, index, bx);
+    const cc = addConcourse(I, rng, P, index, bx, I.kind !== 'plain');
     const block = { index, bx, concourse: cc, platforms: [], halls: [], left2: null, right2: null, maxDepth: 1 };
     let upper = cc.paid;
     let depth = 2;

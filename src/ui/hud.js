@@ -20,11 +20,13 @@
     if (s.mode === 'train') {
       const sv = day.timetable.services[s.ride.service];
       const pos = TT.tripPosition(sv, s.ride.trip, v.t);
+      const atDoor = RULES.DOORS.some((d) => Math.abs(d - s.ride.pos) <= RULES.DOOR_REACH);
       if (pos && pos.state === 'at' && pos.stop !== s.ride.from) {
         const n = stationName(day, sv.stops[pos.stop]);
+        if (!atDoor) return { keys: ['←', '→'], text: `Walk to a door to get off at ${n.en}`, tone: 'warn' };
         return { keys: ['↑', 'E'], text: `Get off at ${n.en} ${n.zh}`, tone: 'go' };
       }
-      if (pos && pos.state === 'between') return { keys: ['Space'], text: `Next: ${stationName(day, sv.stops[pos.next]).en} · hold Space to speed up`, tone: 'info' };
+      if (pos && pos.state === 'between') return { keys: ['←', '→'], text: `Next: ${stationName(day, sv.stops[pos.next]).en} · walk through the train · hold Space to speed up`, tone: 'info' };
       return { keys: [], text: 'Doors closing…', tone: 'info' };
     }
     if (s.mode === 'queue') return { keys: [], text: `${s.link.check.label}: ${Math.ceil(s.timer)} s`, tone: 'warn' };

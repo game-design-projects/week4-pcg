@@ -31,6 +31,9 @@
     let lastKey = '';
     let lastMode = 'walk';
     let replans = 0;
+    const decide = (opts.reaction && opts.reaction.decide) || 0;
+    let hesitating = -1;
+    let hesitateUntil = 0;
 
     function replan() {
       const s = sim.state;
@@ -38,10 +41,12 @@
         startPos: { st: s.st, seg: s.seg, x: s.x, lane: s.lane },
         target: office,
         checkWait: opts.checkWait || 'max',
+        reaction: opts.reaction || null,
       });
       const hops = SOLVER.pathTo(res, office);
       plan = hops ? SOLVER.stepsOf(day, graph, hops) : [];
       idx = 0;
+      hesitating = -1;
       replans += 1;
       return res.best[office];
     }
@@ -59,7 +64,12 @@
       }
       if (s.mode === 'train') {
         const step = plan[idx];
-        if (step && step.type === 'ride' && s.ride.at === step.to && !(s.prev & KEY.ACT)) {
+        if (!step || step.type !== 'ride') return 0;
+        // walk through the carriages to the door the plan gets off at
+        const want = R.RULES.DOORS[step.doorOut ?? step.door];
+        const dx = want - s.ride.pos;
+        if (Math.abs(dx) > EPS) return dx > 0 ? KEY.RIGHT : KEY.LEFT;
+        if (s.ride.at === step.to && !(s.prev & KEY.ACT)) {
           idx += 1;
           return KEY.ACT;
         }
@@ -99,6 +109,14 @@
           if (s.st !== step.st || s.seg !== from.seg) {
             replan();
             continue;
+          }
+          // a hesitant (human-like) commuter stops to read the signs before every link
+          if (decide > 0) {
+            if (hesitating !== idx) {
+              hesitating = idx;
+              hesitateUntil = s.t + decide;
+            }
+            if (s.t < hesitateUntil - 1e-9) return 0;
           }
           if (L.axis === 'h') return step.way === 'ab' ? KEY.RIGHT : KEY.LEFT;
           if (Math.abs(s.x - from.x) > R.RULES.REACH * 0.8) return s.x < from.x ? KEY.RIGHT : KEY.LEFT;

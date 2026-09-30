@@ -195,7 +195,8 @@
             const j = TT.tripAt(service, stop, s.t);
             if (j >= 0 && s.t < TT.depAt(service, j, stop)) {
               s.mode = 'train';
-              s.ride = { service: service.id, trip: j, from: stop, door: k, side, at: stop };
+              // pos: where you stand along the train, metres from its left end
+              s.ride = { service: service.id, trip: j, from: stop, door: k, side, at: stop, pos: RULES.DOORS[k] };
               s.stats.boards += 1;
               ev.push({ type: 'board', line: service.line, dir: service.dir });
               note('board', { line: service.line, dir: service.dir });
@@ -268,10 +269,21 @@
       checkOffice(ev);
     }
 
-    function train(pressed, ev) {
+    function train(mask, pressed, ev) {
       const sv = services[s.ride.service];
       const j = s.ride.trip;
       s.stats.ride += RULES.DT;
+      // walk through the carriages
+      const dir = (mask & KEY.RIGHT ? 1 : 0) - (mask & KEY.LEFT ? 1 : 0);
+      s.moving = 0;
+      if (dir) {
+        const lo = RULES.DOORS[0];
+        const hi = RULES.DOORS[RULES.DOORS.length - 1];
+        const np = Math.max(lo, Math.min(hi, s.ride.pos + dir * RULES.CAR_WALK * RULES.DT));
+        s.moving = np !== s.ride.pos ? dir : 0;
+        s.facing = dir;
+        s.ride.pos = np;
+      }
       let at = -1;
       for (let k = s.ride.from + 1; k < sv.stops.length; k++) {
         const a = TT.arrAt(sv, j, k);
@@ -285,10 +297,24 @@
       if (at < 0) return;
       const terminus = at === sv.stops.length - 1;
       if (terminus || pressed & (KEY.UP | KEY.DOWN | KEY.ACT)) {
+        let door = RULES.DOORS.findIndex((d) => Math.abs(d - s.ride.pos) <= RULES.DOOR_REACH);
+        if (door < 0 && !terminus) {
+          ev.push({ type: 'blocked', why: 'no-door' });
+          return;
+        }
+        if (door < 0) {
+          let bestD = Infinity;
+          RULES.DOORS.forEach((d, i) => {
+            if (Math.abs(d - s.ride.pos) < bestD) {
+              bestD = Math.abs(d - s.ride.pos);
+              door = i;
+            }
+          });
+        }
         s.mode = 'alight';
         s.timerTotal = RULES.ALIGHT;
         s.timer = RULES.ALIGHT - RULES.DT;
-        s.alightTo = { station: sv.stops[at], line: sv.line, dir: sv.dir, door: s.ride.door };
+        s.alightTo = { station: sv.stops[at], line: sv.line, dir: sv.dir, door };
         ev.push({ type: 'alight', terminus });
         note('alight', { line: sv.line, at: sv.stops[at], terminus });
       }
@@ -371,7 +397,7 @@
           break;
         }
         case 'train':
-          train(pressed, ev);
+          train(mask, pressed, ev);
           break;
         case 'alight':
           s.timer -= RULES.DT;

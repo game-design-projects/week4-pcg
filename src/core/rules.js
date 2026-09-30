@@ -23,6 +23,7 @@
     DWELL: 30, //                s a train stands at a platform with its doors open
     BOARD_MARGIN: 2, //          s the solver keeps in hand before a departure
     ALIGHT: 2, //                s to step off a train
+    CAR_WALK: 1.0, //            m/s walking through a crowded carriage while riding
     REACH: 0.9, //               m from a stair/escalator/lift end to use it
     DOOR_REACH: 1.6, //          m from a train door to board
     OFFICE_REACH: 1.0, //        m from the office door to clock in
@@ -93,6 +94,15 @@
     return phase < RULES.LIFT_DWELL;
   }
 
+  /**
+   * Can a rider who boarded at door `d` of a service's stop k walk through the
+   * carriages to door `d2` before the train reaches stop m?
+   */
+  function canReachDoor(service, k, m, d, d2) {
+    const ride = service.arrOff[m] - service.depOff[k];
+    return Math.abs(RULES.DOORS[d2] - RULES.DOORS[d]) <= RULES.CAR_WALK * ride;
+  }
+
   /** Seconds to go through link `link` in direction `way` ('ab' or 'ba') when starting at t (not counting waits). */
   function linkBaseTime(link, way) {
     switch (link.kind) {
@@ -128,5 +138,5 @@
     return m ? `${m}m ${String(r).padStart(2, '0')}s` : `${r}s`;
   }
 
-  return { RULES, walkSpeed, lanesOf, escalatorDir, escalatorReady, liftArrival, liftOpenAt, linkBaseTime, isChecked, fmtClock, fmtDuration };
+  return { RULES, walkSpeed, lanesOf, escalatorDir, escalatorReady, liftArrival, liftOpenAt, linkBaseTime, isChecked, canReachDoor, fmtClock, fmtDuration };
 });

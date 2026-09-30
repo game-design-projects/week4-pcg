@@ -137,3 +137,45 @@ test('in the simulation walking against an opposing lane crawls, and switching l
   assert.equal(sw.s.mode, 'lane');
   assert.ok(sw.evs.some((e) => e.type === 'lane'));
 });
+
+test('entering a two-lane floor puts you in the near lane, in the solver and the simulation alike', () => {
+  const { day, st, I, s: seg } = findSeg('opposing', 2);
+  const g = Late.day.graphOf(day);
+  const si = g.stationIndex.get(st.id);
+  for (const L of I.links) {
+    const a = I.segs[L.a.seg];
+    const b = I.segs[L.b.seg];
+    const keep = L.axis === 'h' && Late.rules.lanesOf(a) === 2 && Late.rules.lanesOf(b) === 2;
+    for (const e of g.adj.flatMap((list, u) => list.filter((x) => x.type === 'link' && x.link === L).map((x) => ({ ...x, from: u })))) {
+      const to = g.nodes[e.to];
+      const from = g.nodes[e.from];
+      if (keep) assert.equal(to.lane, from.lane);
+      else assert.equal(to.lane, 0, `link ${L.id} lands in lane ${to.lane}`);
+    }
+  }
+  assert.ok(si >= 0 && seg);
+});
+
+test('riding a train you can walk through the carriages to another door', () => {
+  const day = Late.day.generateDay('CARWALK', Late.difficulty.paramsFor(1));
+  const K = Late.sim.KEY;
+  // board the first train from home by autopilot, then walk right inside it
+  const sim = Late.sim.createSim(day);
+  const ap = Late.autopilot.createAutopilot(day, sim);
+  ap.replan();
+  while (sim.state.mode !== 'train' && !sim.state.done) sim.step(ap.input());
+  const r = sim.state.ride;
+  const pos0 = r.pos;
+  const dir = pos0 < 60 ? K.RIGHT : K.LEFT;
+  for (let i = 0; i < 40; i++) sim.step(dir);
+  assert.ok(Math.abs(Math.abs(sim.state.ride.pos - pos0) - RULES.CAR_WALK * RULES.DT * 40) < 1e-9);
+  // the solver may plan to get off at a different door than you got on at
+  let different = 0;
+  for (let i = 0; i < 12; i++) {
+    const d = Late.day.generateDay(`CARWALK-${i}`, Late.difficulty.paramsFor(i % 5));
+    const best = Late.day.bestRoute(d, Late.day.graphOf(d), d.startTime);
+    different += best.stats.steps.filter((x) => x.type === 'ride' && x.doorOut !== x.door).length;
+    assert.equal(best.stats.reboards, 0, 'no more hopping off to change cars');
+  }
+  assert.ok(different > 0);
+});

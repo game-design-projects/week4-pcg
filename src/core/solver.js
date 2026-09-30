@@ -66,26 +66,33 @@
           perLane.push(ids);
         }
         if (perLane.length === 2) {
+          // Up/Down change lanes, except where the same key takes the stairs:
+          // at the foot of an up-link Up climbs, at the top of a down-link Down descends
+          const upHere = (x) => I.links.some((l) => l.axis === 'v' && l.b.seg === seg.id && Math.abs(l.b.x - x) <= RULES.REACH);
+          const downHere = (x) => I.links.some((l) => l.axis === 'v' && l.a.seg === seg.id && Math.abs(l.a.x - x) <= RULES.REACH);
           for (let i = 0; i < sorted.length; i++) {
-            adj[perLane[0][i]].push({ type: 'lane', to: perLane[1][i], cost: RULES.LANE_SWITCH });
-            adj[perLane[1][i]].push({ type: 'lane', to: perLane[0][i], cost: RULES.LANE_SWITCH });
+            if (!upHere(sorted[i])) adj[perLane[0][i]].push({ type: 'lane', to: perLane[1][i], cost: RULES.LANE_SWITCH });
+            if (!downHere(sorted[i])) adj[perLane[1][i]].push({ type: 'lane', to: perLane[0][i], cost: RULES.LANE_SWITCH });
           }
         }
         segNodes[si][seg.id] = perLane;
       }
-      // links: connect every lane at each end
+      // links: you can take a link from either lane; you arrive in the near
+      // lane (lane 0), except that a joint between two two-lane floors keeps
+      // your lane — exactly what the simulation does
       for (const link of I.links) {
         const aSeg = I.segs[link.a.seg];
         const bSeg = I.segs[link.b.seg];
+        const keep = link.axis === 'h' && lanesOf(aSeg) === 2 && lanesOf(bSeg) === 2;
         for (let la = 0; la < lanesOf(aSeg); la++) {
-          for (let lb = 0; lb < lanesOf(bSeg); lb++) {
-            // horizontal links keep the lane when both sides have two
-            if (link.axis === 'h' && lanesOf(aSeg) === 2 && lanesOf(bSeg) === 2 && la !== lb) continue;
-            const u = lookup[si].get(k2(aSeg.id, link.a.x, la));
-            const v = lookup[si].get(k2(bSeg.id, link.b.x, lb));
-            adj[u].push({ type: 'link', to: v, link, way: 'ab', st: si });
-            adj[v].push({ type: 'link', to: u, link, way: 'ba', st: si });
-          }
+          const u = lookup[si].get(k2(aSeg.id, link.a.x, la));
+          const v = lookup[si].get(k2(bSeg.id, link.b.x, keep ? la : 0));
+          adj[u].push({ type: 'link', to: v, link, way: 'ab', st: si });
+        }
+        for (let lb = 0; lb < lanesOf(bSeg); lb++) {
+          const v = lookup[si].get(k2(bSeg.id, link.b.x, lb));
+          const u = lookup[si].get(k2(aSeg.id, link.a.x, keep ? lb : 0));
+          adj[v].push({ type: 'link', to: u, link, way: 'ba', st: si });
         }
       }
       // train doors
@@ -140,7 +147,7 @@
   function arrive(edge, t, opts) {
     if (edge.type !== 'link') return t + edge.cost;
     const L = edge.link;
-    let t2 = t;
+    let t2 = t + (L.kind !== 'joint' && opts.reaction && opts.reaction.decide ? opts.reaction.decide : 0);
     if (L.closedUntil && t2 < L.closedUntil) {
       if (L.closedUntil === Infinity) return Infinity;
       t2 = L.closedUntil;
@@ -203,7 +210,8 @@
     const prev = new Int32Array(N).fill(-1);
     const how = new Array(N);
     const heap = makeHeap();
-    const o = { checkWait: opts.checkWait || 'max' };
+    const o = { checkWait: opts.checkWait || 'max', reaction: opts.reaction || null };
+    const boardMargin = RULES.BOARD_MARGIN + ((opts.reaction && opts.reaction.board) || 0);
     if (opts.startPos) {
       const sp = opts.startPos;
       const I = day.interiors[day.network.stations[sp.st].id];
@@ -264,22 +272,150 @@
         const door = graph.nodes[u].door;
         for (const b of boards) {
           const s = b.service;
-          const j = TT.nextTrip(s, b.stop, t + RULES.BOARD_MARGIN);
+          const j = TT.nextTrip(s, b.stop, t + boardMargin);
           if (j < 0) continue;
           for (let m = b.stop + 1; m < s.stops.length; m++) {
-            const v = graph.alightNode(s, m, door);
             const t2 = TT.arrAt(s, j, m) + RULES.ALIGHT;
-            if (t2 < best[v]) {
-              best[v] = t2;
-              prev[v] = u;
-              how[v] = { type: 'train', service: s.id, trip: j, from: b.stop, to: m, side: b.side, door, dep: TT.depAt(s, j, b.stop), arr: TT.arrAt(s, j, m) };
-              heap.push(t2, v);
+            // while riding you can walk through the carriages to another door
+            for (let d2 = 0; d2 < RULES.DOORS.length; d2++) {
+              if (!R.canReachDoor(s, b.stop, m, door, d2)) continue;
+              const v = graph.alightNode(s, m, d2);
+              if (t2 < best[v]) {
+                best[v] = t2;
+                prev[v] = u;
+                how[v] = { type: 'train', service: s.id, trip: j, from: b.stop, to: m, side: b.side, door, doorOut: d2, dep: TT.depAt(s, j, b.stop), arr: TT.arrAt(s, j, m) };
+                heap.push(t2, v);
+              }
             }
           }
         }
       }
     }
     return { best, prev, how, t0 };
+  }
+
+  // ------------------------------------------------------------------ deadlines
+
+  function reverseOf(graph) {
+    if (graph.rev) return graph.rev;
+    const N = graph.nodes.length;
+    const rev = Array.from({ length: N }, () => []);
+    for (let u = 0; u < N; u++) {
+      for (const e of graph.adj[u]) rev[e.to].push({ from: u, edge: e });
+      const boards = graph.boardAt.get(u);
+      if (!boards) continue;
+      const door = graph.nodes[u].door;
+      for (const b of boards) {
+        for (let m = b.stop + 1; m < b.service.stops.length; m++) {
+          for (let d2 = 0; d2 < RULES.DOORS.length; d2++) {
+            if (R.canReachDoor(b.service, b.stop, m, door, d2)) rev[graph.alightNode(b.service, m, d2)].push({ from: u, train: { service: b.service, k: b.stop, m } });
+          }
+        }
+      }
+    }
+    graph.rev = rev;
+    return rev;
+  }
+
+  /** Latest time you can start along reverse edge `r` and still be at its far end by T. */
+  function latestDep(r, T, opts) {
+    const decide = (opts.reaction && opts.reaction.decide) || 0;
+    const boardExtra = (opts.reaction && opts.reaction.board) || 0;
+    if (r.train) {
+      const { service: s, k, m } = r.train;
+      const lim = T - RULES.ALIGHT - s.arrOff[m];
+      const d = s.deps;
+      let lo = 0;
+      let hi = d.length - 1;
+      let j = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (d[mid] <= lim) {
+          j = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      return j < 0 ? -Infinity : TT.depAt(s, j, k) - RULES.BOARD_MARGIN - boardExtra;
+    }
+    const e = r.edge;
+    if (e.type !== 'link') return T - e.cost;
+    const Lk = e.link;
+    let T2 = T;
+    if (Lk.kind === 'escalator') {
+      const want = e.way === 'ab' ? 1 : -1;
+      const t0 = T2 - RULES.ESCALATOR * Lk.levels;
+      if (R.escalatorDir(Lk.esc, t0) === want) T2 = t0;
+      else if (!Lk.esc.period) return -Infinity;
+      else T2 = Lk.esc.phase + Math.floor((t0 - Lk.esc.phase) / Lk.esc.period) * Lk.esc.period - 0.001;
+    } else if (Lk.kind === 'lift') {
+      const travel = RULES.LIFT_TRAVEL * Lk.lift.levels;
+      const period = 2 * (RULES.LIFT_DWELL + travel);
+      const offset = e.way === 'ab' ? 0 : RULES.LIFT_DWELL + travel;
+      // car leaves `from` at phase + offset + n*period + DWELL and arrives travel later
+      const n = Math.floor((T2 - travel - RULES.LIFT_DWELL - Lk.lift.phase - offset) / period);
+      T2 = Lk.lift.phase + offset + n * period + RULES.LIFT_DWELL - 0.001;
+    } else T2 -= linkBaseTime(Lk, e.way);
+    if (isChecked(Lk, e.way)) T2 -= checkWaitOf(Lk, opts.checkWait || 'max');
+    if (Lk.closedUntil) {
+      if (Lk.closedUntil === Infinity) return -Infinity;
+      if (T2 < Lk.closedUntil) return -Infinity;
+    }
+    return Lk.kind === 'joint' ? T2 : T2 - decide;
+  }
+
+  /**
+   * The deadline map: for every node, the latest time you can be there and
+   * still reach `target` by `deadline` (-Infinity if you cannot). A reverse
+   * Dijkstra on latest departure times, exact for the same FIFO reasons as solve().
+   */
+  function latestDepartures(day, graph, target, deadline, opts = {}) {
+    const N = graph.nodes.length;
+    const rev = reverseOf(graph);
+    const LD = new Float64Array(N).fill(-Infinity);
+    const a = [];
+    const push = (t, n) => {
+      a.push([t, n]);
+      let i = a.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (a[p][0] >= a[i][0]) break;
+        [a[p], a[i]] = [a[i], a[p]];
+        i = p;
+      }
+    };
+    const pop = () => {
+      const top = a[0];
+      const last = a.pop();
+      if (a.length) {
+        a[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1;
+          const r = l + 1;
+          let m = i;
+          if (l < a.length && a[l][0] > a[m][0]) m = l;
+          if (r < a.length && a[r][0] > a[m][0]) m = r;
+          if (m === i) break;
+          [a[m], a[i]] = [a[i], a[m]];
+          i = m;
+        }
+      }
+      return top;
+    };
+    LD[target] = deadline;
+    push(deadline, target);
+    while (a.length) {
+      const [t, v] = pop();
+      if (t < LD[v]) continue;
+      for (const r of rev[v]) {
+        const tu = latestDep(r, t, opts);
+        if (tu > LD[r.from]) {
+          LD[r.from] = tu;
+          push(tu, r.from);
+        }
+      }
+    }
+    return LD;
   }
 
   /** Hops from the start to `target`: [{node, how, t}] in order (first hop is the start). */
@@ -315,7 +451,7 @@
         } else steps.push({ type: 'walk', st: n.st, seg: n.seg, lane: n.lane, x: n.x, t: h.t });
       } else if (how.type === 'lane') steps.push({ type: 'lane', st: n.st, seg: n.seg, lane: n.lane, x: n.x, t: h.t });
       else if (how.type === 'link') steps.push({ type: 'link', st: n.st, link: how.link.id, way: how.way, kind: how.link.kind, t: h.t });
-      else if (how.type === 'train') steps.push({ type: 'ride', service: how.service, trip: how.trip, from: how.from, to: how.to, side: how.side, door: how.door, dep: how.dep, arr: how.arr, st: n.st, t: h.t });
+      else if (how.type === 'train') steps.push({ type: 'ride', service: how.service, trip: how.trip, from: how.from, to: how.to, side: how.side, door: how.door, doorOut: how.doorOut, dep: how.dep, arr: how.arr, st: n.st, t: h.t });
     }
     return steps;
   }
@@ -393,7 +529,11 @@
       const boards = graph.boardAt.get(u);
       if (boards) {
         for (const b of boards) {
-          for (let m = b.stop + 1; m < b.service.stops.length; m++) addE(u, graph.alightNode(b.service, m, graph.nodes[u].door));
+          for (let m = b.stop + 1; m < b.service.stops.length; m++) {
+            for (let d2 = 0; d2 < RULES.DOORS.length; d2++) {
+              if (R.canReachDoor(b.service, b.stop, m, graph.nodes[u].door, d2)) addE(u, graph.alightNode(b.service, m, d2));
+            }
+          }
         }
       }
     }
@@ -417,5 +557,5 @@
     return { ok: F[goal] === 1 && traps.length === 0, reachable: F[goal] === 1, traps };
   }
 
-  return { buildGraph, nodeAt, solve, pathTo, stepsOf, routeStats, trapCheck, arrive };
+  return { buildGraph, nodeAt, solve, pathTo, stepsOf, routeStats, trapCheck, arrive, latestDepartures };
 });

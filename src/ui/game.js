@@ -209,6 +209,7 @@
           if (e.why === 'one-way') toast('单向通行 One way — not this way', '#b3261e', 1.2);
           else if (e.why === 'escalator') toast('Escalator is running the other way', '#b3261e', 1.2);
           else if (e.why === 'closed') toast(e.text || 'Closed', '#9a6a00', 1.5);
+          else if (e.why === 'no-door') toast('Walk to a door first ← →', '#9a6a00', 1.2);
           A.blocked();
           break;
         case 'queue':

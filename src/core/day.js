@@ -25,7 +25,7 @@
 })(typeof self !== 'undefined' ? self : this, function (R, RNG, NET, INT, TT, SOLVER, DIFF) {
   'use strict';
 
-  const GEN_VERSION = 'g1';
+  const GEN_VERSION = 'g2';
   const { RULES } = R;
   const NOMINAL = 8 * 3600; // time used while shaping the day, before the real start is known
   const graphs = new WeakMap();
@@ -97,11 +97,20 @@
     return day.interiors[day.network.stations[stIdx].id].segs[segId].kind;
   }
 
+  /**
+   * Checkpoints go on the best route at the day's real start time, one at a
+   * time (re-timing the day after each). Candidates are scored by how hard
+   * they are to walk around: we close each one in turn and see how much later
+   * the best route gets. The hardest to avoid are the most likely picks, so a
+   * checkpoint either has to be queued at or costs a real detour.
+   */
   function placeCheckpoints(day, graph, rng, P) {
     const placed = [];
+    const { home } = endNodes(day, graph);
     for (let c = 0; c < P.checkpoints; c++) {
-      const r = bestRoute(day, graph, NOMINAL);
+      const r = bestRoute(day, graph, day.startTime);
       if (!r) return placed;
+      const ldOpen = humanDeadlines(day, graph, P)[home];
       const cands = [];
       for (let i = 1; i < r.hops.length; i++) {
         const e = r.hops[i].how;
@@ -120,14 +129,27 @@
           w = 3;
           label = 'ID check';
         }
-        if (w) cands.push([{ e, label, st: e.st }, w]);
+        if (!w) continue;
+        // how much earlier would you have to leave home if this spot were blocked?
+        e.link.closedUntil = Infinity;
+        const ldClosed = humanDeadlines(day, graph, P)[home];
+        delete e.link.closedUntil;
+        const avoid = ldClosed > -Infinity ? Math.max(0, ldOpen - ldClosed) : 3600;
+        cands.push({ e, label, st: e.st, avoid, w });
       }
       if (!cands.length) return placed;
-      const pick = rng.weighted(cands);
       const wmin = P.checkWait[0] + rng.int(0, 15);
       const wmax = Math.max(wmin + 30, P.checkWait[1] + rng.int(0, 45));
+      // prefer spots a typical commuter would rather queue at than walk around
+      const mean = (wmin + wmax) / 2;
+      const hard = cands.filter((cd) => cd.avoid >= mean);
+      const pool = hard.length ? hard : cands;
+      const pick = rng.weighted(pool.map((cd) => [cd, cd.w * (1 + Math.min(cd.avoid, 600) / 60)]));
       pick.e.link.check = { dir: pick.e.way === 'ab' ? 1 : -1, wmin, wmax, label: pick.label, id: placed.length };
-      placed.push({ station: day.network.stations[pick.st].id, link: pick.e.link.id, label: pick.label, wmin, wmax });
+      placed.push({ station: day.network.stations[pick.st].id, link: pick.e.link.id, label: pick.label, wmin, wmax, avoid: Math.round(Math.min(pick.avoid, 3600)) });
+      const t = timeDay(day, graph, P);
+      if (t === null) return placed;
+      day.startTime = t;
     }
     return placed;
   }
@@ -136,7 +158,7 @@
     const placed = [];
     const { home, office } = endNodes(day, graph);
     for (let d = 0; d < P.disruptions; d++) {
-      const r = bestRoute(day, graph, NOMINAL);
+      const r = bestRoute(day, graph, day.startTime);
       if (!r) return placed;
       const cands = [];
       for (let i = 1; i < r.hops.length; i++) {
@@ -148,12 +170,14 @@
       for (const e of rng.shuffle(cands)) {
         const L = e.link;
         L.closedUntil = Infinity;
-        const again = bestRoute(day, graph, NOMINAL);
+        const again = bestRoute(day, graph, day.startTime);
         const trap = SOLVER.trapCheck(day, graph, home, office);
         if (again && trap.ok && again.stats.total <= P.maxTrip) {
           L.closure = L.kind === 'joint' ? 'Passage closed for works' : L.kind === 'escalator' ? 'Escalator out of service' : 'Stairs closed';
           placed.push({ station: day.network.stations[e.st].id, link: L.id, kind: L.kind, reason: L.closure, cost: again.arrival - r.arrival });
           done = true;
+          const t = timeDay(day, graph, P);
+          if (t !== null) day.startTime = t;
           break;
         }
         delete L.closedUntil;
@@ -165,18 +189,27 @@
 
   // ------------------------------------------------------------ step 6
 
-  function latestStart(day, graph, want) {
-    const { home, office } = endNodes(day, graph);
-    const arr = (T) => SOLVER.solve(day, graph, home, T, { target: office, checkWait: 'max' }).best[office];
-    let lo = RULES.CLOCK_IN - 3 * 3600;
-    let hi = RULES.CLOCK_IN - 5 * 60;
-    if (!(arr(lo) <= want)) return null;
-    while (hi - lo > 5) {
-      const mid = Math.floor((lo + hi) / 10) * 5;
-      if (arr(mid) <= want) lo = mid;
-      else hi = mid;
-    }
-    return Math.floor(lo / 60) * 60;
+  /**
+   * The deadline map for a human-paced commuter (a pause at every stair and
+   * gate, a few seconds' margin to step onto a train) with worst-case queues:
+   * LD[n] is the latest time you can be at n and still clock in.
+   */
+  function humanDeadlines(day, graph, P) {
+    const { office } = endNodes(day, graph);
+    return SOLVER.latestDepartures(day, graph, office, RULES.CLOCK_IN, { checkWait: 'max', reaction: P.humanReaction });
+  }
+
+  /**
+   * The day starts `slack` seconds before the latest moment a human-paced
+   * commuter could leave home and still make it: that is exactly how much
+   * time the player can lose (rounded down to the minute, never up).
+   */
+  function timeDay(day, graph, P) {
+    const { home } = endNodes(day, graph);
+    const LD = humanDeadlines(day, graph, P);
+    if (!(LD[home] > -Infinity)) return null;
+    const start = Math.floor((LD[home] - P.slack) / 60) * 60;
+    return start >= TT.T_OPEN + 300 ? start : null;
   }
 
   // ------------------------------------------------------------ pipeline
@@ -200,11 +233,11 @@
 
     const first = chooseEnds(day, graph, rng.fork('ends'), P);
     if (!first) return { reason: 'no home/office pair with the wanted route' };
-    day.checkpoints = placeCheckpoints(day, graph, rng.fork('checkpoints'), P);
+    day.startTime = timeDay(day, graph, P);
+    if (day.startTime === null) return { reason: 'cannot make clock-in from any start' };
     day.disruptions = placeDisruptions(day, graph, rng.fork('disruptions'), P);
-
-    const want = RULES.CLOCK_IN - P.slack;
-    const start = latestStart(day, graph, want);
+    day.checkpoints = placeCheckpoints(day, graph, rng.fork('checkpoints'), P);
+    const start = timeDay(day, graph, P);
     if (start === null) return { reason: 'cannot make clock-in from any start' };
     day.startTime = start;
 
@@ -214,6 +247,9 @@
     const spare = RULES.CLOCK_IN - worst.arrival;
     if (spare < P.minSpare) return { reason: 'not winnable with worst-case waits' };
     const { home, office } = endNodes(day, graph);
+    const LD = humanDeadlines(day, graph, P);
+    const tolerance = LD[home] - start;
+    if (tolerance < P.minSpare) return { reason: 'a human-paced commuter would have no time to spare' };
     const trap = SOLVER.trapCheck(day, graph, home, office);
     if (!trap.ok) return { reason: `trap (${trap.traps.length} dead-end places)` };
     const shape = routeShapeOk(worst.stats, P);
@@ -224,6 +260,7 @@
     day.par = {
       arrival: worst.arrival,
       spare,
+      tolerance,
       typicalArrival: typical ? typical.arrival : worst.arrival,
       transfers: worst.stats.transfers,
       lines: worst.stats.lines,
@@ -232,7 +269,7 @@
       walking: worst.stats.walking,
       riding: worst.stats.riding,
     };
-    day.checks = { winnable: true, trapFree: true, spare, placesChecked: graph.nodes.length };
+    day.checks = { winnable: true, trapFree: true, spare, tolerance, placesChecked: graph.nodes.length };
     return { day };
   }
 
@@ -270,5 +307,5 @@
     return lk;
   }
 
-  return { GEN_VERSION, generateDay, graphOf, bestRoute, endNodes, stationIndex, lookups, NOMINAL };
+  return { GEN_VERSION, generateDay, graphOf, bestRoute, endNodes, stationIndex, lookups, humanDeadlines, NOMINAL };
 });

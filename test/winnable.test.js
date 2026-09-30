@@ -16,7 +16,9 @@ test('every generated day passes the winnable check (sample over the week)', () 
       const day = Late.day.generateDay(`WIN-${wd}-${i}`, params);
       assert.ok(day.checks.winnable && day.checks.trapFree, `${day.seed}`);
       assert.ok(day.par.arrival <= RULES.CLOCK_IN - params.minSpare, `${day.seed}: best route arrives ${day.par.arrival}`);
-      assert.ok(RULES.CLOCK_IN - day.par.arrival >= params.slack - 1, `${day.seed}: spare below the day's slack`);
+      // a human-paced commuter can lose exactly the day's slack (plus under a minute of rounding)
+      assert.ok(day.par.tolerance >= params.slack, `${day.seed}: tolerance ${day.par.tolerance} below slack ${params.slack}`);
+      assert.ok(day.par.tolerance < params.slack + 60, `${day.seed}: tolerance ${day.par.tolerance} too loose`);
       const g = Late.day.graphOf(day);
       const { home, office } = Late.day.endNodes(day, g);
       assert.ok(Late.solver.trapCheck(day, g, home, office).ok, `${day.seed}: trap`);
@@ -32,6 +34,36 @@ test('the check is honest: a perfect player in the real simulation arrives by th
       assert.equal(st.result.how, 'office', day.seed);
       assert.ok(st.result.arrival <= day.par.arrival + 0.001, `${day.seed}: sim ${st.result.arrival} > promised ${day.par.arrival}`);
       assert.ok(!st.result.late, day.seed);
+    }
+  }
+});
+
+test('the check is fair: a hesitant, human-paced commuter also clocks in on time', () => {
+  const human = Late.difficulty.BASE.humanReaction;
+  for (let wd = 0; wd < 5; wd++) {
+    for (let i = 0; i < 3; i++) {
+      const day = Late.day.generateDay(`FAIR-${wd}-${i}`, P(wd));
+      const st = Late.autopilot.playDay(day, { reaction: human });
+      assert.equal(st.result.how, 'office', day.seed);
+      assert.ok(!st.result.late, `${day.seed}: hesitant commuter ${Math.round(-st.result.margin)} s late`);
+    }
+  }
+});
+
+test('the deadline map is exact: leave at the latest time and you make it, one second later and you do not', () => {
+  for (let wd = 1; wd < 5; wd += 2) {
+    const day = Late.day.generateDay(`LD-${wd}`, P(wd));
+    const g = Late.day.graphOf(day);
+    const { home, office } = Late.day.endNodes(day, g);
+    const LD = Late.solver.latestDepartures(day, g, office, RULES.CLOCK_IN);
+    const at = (t) => Late.solver.solve(day, g, home, t, { target: office }).best[office];
+    assert.ok(at(LD[home]) <= RULES.CLOCK_IN, day.seed);
+    assert.ok(at(LD[home] + 1) > RULES.CLOCK_IN, day.seed);
+    // and it holds from anywhere, not just from home: check a spread of nodes
+    for (let n = 0; n < g.nodes.length; n += 97) {
+      if (!(LD[n] > -Infinity)) continue;
+      const a = Late.solver.solve(day, g, n, LD[n], { target: office }).best[office];
+      assert.ok(a <= RULES.CLOCK_IN + 1e-6, `${day.seed}: node ${n}`);
     }
   }
 });

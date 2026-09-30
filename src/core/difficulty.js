@@ -24,7 +24,7 @@
     escPeriod: [240, 540],
     escalatorShare: 0.8,
     escOnlyShare: 0.1,
-    opposingShare: 0.55, //    passages with two opposing lanes
+    opposingShare: 0.8, //     passages with two opposing lanes
     keepLeftShare: 0.1, //     ...of which flow the "wrong" way round
     mazeTransferShare: 0.1, // two-block interchanges linked by one-way passages
     minTransfers: 1,
@@ -33,18 +33,21 @@
     checkpoints: 0,
     checkWait: [25, 110], //   s, random wait at a checkpoint
     disruptions: 0,
-    slack: 360, //             s the best route arrives before clock-in
+    slack: 360, //             s a human-paced commuter can lose and still clock in on time
     minSpare: 60, //           the winnable check: best route with worst waits must beat clock-in by this
+    humanReaction: { decide: 10, board: 8 }, // s a real player needs at each stair/gate, and to step onto a train
+    concourseOpposingShare: 0.5, // paid concourses at interchanges with two opposing lanes
+    unpaidOpposingShare: 0.35, //   unpaid halls by the exits with the morning counterflow
     minTrip: 14 * 60,
     maxTrip: 55 * 60,
   });
 
   const WEEK = [
-    { day: 'Mon', zh: '周一', lines: 4, hubFlavors: ['sprawl'], minTransfers: 1, maxTransfers: 1, checkpoints: 0, disruptions: 0, slack: 420, irregularShare: 0, reversibleShare: 0.15 },
-    { day: 'Tue', zh: '周二', lines: 4, hubFlavors: ['sprawl', 'split'], minTransfers: 1, maxTransfers: 2, checkpoints: 1, disruptions: 0, slack: 330, irregularShare: 0.25 },
-    { day: 'Wed', zh: '周三', lines: 5, hubFlavors: ['sprawl', 'split', 'maze'], minTransfers: 1, maxTransfers: 2, hubOnRoute: true, checkpoints: 2, disruptions: 1, slack: 270, irregularShare: 0.4 },
-    { day: 'Thu', zh: '周四', lines: 5, hubFlavors: ['maze', 'split', 'deep'], minTransfers: 2, maxTransfers: 3, hubOnRoute: true, checkpoints: 3, disruptions: 1, slack: 210, irregularShare: 0.5, reversibleShare: 0.35 },
-    { day: 'Fri', zh: '周五', lines: 6, hubFlavors: ['maze', 'deep', 'split'], minTransfers: 2, maxTransfers: 3, hubOnRoute: true, checkpoints: 4, disruptions: 2, slack: 180, irregularShare: 0.6, reversibleShare: 0.4 },
+    { day: 'Mon', zh: '周一', lines: 4, hubFlavors: ['sprawl'], minTransfers: 1, maxTransfers: 1, checkpoints: 0, disruptions: 0, slack: 420, irregularShare: 0, reversibleShare: 0.15, mazeTransferShare: 0.1 },
+    { day: 'Tue', zh: '周二', lines: 4, hubFlavors: ['sprawl', 'split'], minTransfers: 1, maxTransfers: 2, checkpoints: 1, disruptions: 0, slack: 330, irregularShare: 0.25, mazeTransferShare: 0.15 },
+    { day: 'Wed', zh: '周三', lines: 5, hubFlavors: ['sprawl', 'split', 'maze'], minTransfers: 1, maxTransfers: 2, hubOnRoute: true, checkpoints: 2, disruptions: 1, slack: 270, irregularShare: 0.4, mazeTransferShare: 0.3 },
+    { day: 'Thu', zh: '周四', lines: 5, hubFlavors: ['maze', 'split', 'deep'], minTransfers: 2, maxTransfers: 3, hubOnRoute: true, checkpoints: 3, disruptions: 1, slack: 210, irregularShare: 0.5, reversibleShare: 0.35, mazeTransferShare: 0.35 },
+    { day: 'Fri', zh: '周五', lines: 6, hubFlavors: ['maze', 'deep', 'split'], minTransfers: 2, maxTransfers: 3, hubOnRoute: true, checkpoints: 4, disruptions: 2, slack: 180, irregularShare: 0.6, reversibleShare: 0.4, mazeTransferShare: 0.4 },
   ];
 
   /** Full generator params for weekday 0..4, plus optional Director adjustments. */
