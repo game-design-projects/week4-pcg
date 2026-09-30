@@ -16,7 +16,7 @@ Build a game prototype that incorporates PCG: generate the levels, or something 
 
 The game is played over a five-day work week. Difficulty rises through the week by giving the player less information (a timetable shown once and then hidden, signs that go out of date) and by adding checkpoints.
 
-**Status:** design stage. There is no playable prototype yet. Requirements and ideas are in [`idea.md`](idea.md).
+**Status:** first playable version (0.1). Open `index.html` to play. Requirements and ideas are in [`idea.md`](idea.md); what changed between versions is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## How our PCG works
 
@@ -56,7 +56,7 @@ The game stays fully playable offline or with both turned off. Details are in [`
 
 ## How to run
 
-The prototype is not implemented yet. The plan is a static web page with no build step: open `index.html` in a browser. rot.js (2.2.1) may be vendored into the repo for its seeded RNG and map generators. Telemetry and the leaderboard would need our own Worker and D1 database, deployed separately with wrangler; the game itself does not depend on them.
+Open `index.html` in a browser (double-clicking it works: the scripts are plain `<script>` files, no build step). Run the tests with `node --test` (Node 20 or newer). A headless playthrough is `node tools/playtest.mjs` (needs Playwright).
 
 ## Research notes
 

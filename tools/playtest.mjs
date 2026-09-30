@@ -1,0 +1,191 @@
+// Headless playtest: opens index.html straight from disk in Chromium and plays
+// real days through the game's own keyboard handler. The "player" is the
+// autopilot running inside the page; each tick it decides which keys should
+// be down and the script dispatches keydown/keyup events, so the whole path
+// (keyboard → input.js → simulation → rendering → result screen) is exercised.
+//
+//   node tools/playtest.mjs                 play Monday of a fresh week
+//   node tools/playtest.mjs --week          play Monday to Friday, shop in between
+//   node tools/playtest.mjs --late          dawdle until 09:00 first, expect a LATE result
+//   node tools/playtest.mjs --shots DIR     save screenshots of every phase to DIR
+//
+// Needs Playwright (npm i -D playwright, or a global install on NODE_PATH).
+import { createRequire } from 'node:module';
+import { mkdirSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const here = dirname(fileURLToPath(import.meta.url));
+const args = process.argv.slice(2);
+const flag = (f) => args.includes(f);
+const shotsDir = args.includes('--shots') ? resolve(args[args.indexOf('--shots') + 1]) : null;
+if (shotsDir) mkdirSync(shotsDir, { recursive: true });
+const seedArg = args.includes('--seed') ? args[args.indexOf('--seed') + 1] : 'PLAYTEST-1';
+
+const url = pathToFileURL(resolve(here, '..', 'index.html')).href;
+const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const errors = [];
+page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+page.on('console', (m) => {
+  if (m.type() === 'error' && !/fonts\.googleapis|fonts\.gstatic|ERR_CERT|ERR_NAME|ERR_INTERNET|net::/.test(m.text())) errors.push(`console: ${m.text()}`);
+});
+
+let shotN = 0;
+async function shot(name) {
+  if (!shotsDir) return;
+  shotN += 1;
+  await page.screenshot({ path: `${shotsDir}/${String(shotN).padStart(2, '0')}-${name}.png` });
+}
+
+async function waitScreen(name, timeout = 240000) {
+  await page.waitForFunction((n) => window.__late && window.__late.screen === n, name, { timeout, polling: 200 });
+}
+
+/** Install the keyboard-driving autopilot. `dawdleUntil`: stand still (holding Space) until that game time. */
+async function drive(dawdleUntil) {
+  await page.evaluate((until) => {
+    const game = window.__late;
+    const L = window.Late;
+    const K = L.sim.KEY;
+    const codes = [[K.LEFT, 'ArrowLeft'], [K.RIGHT, 'ArrowRight'], [K.UP, 'ArrowUp'], [K.DOWN, 'ArrowDown'], [K.ACT, 'KeyE']];
+    let held = 0;
+    let spaceDown = false;
+    const send = (type, code) => window.dispatchEvent(new KeyboardEvent(type, { code, key: code, bubbles: true }));
+    game.__ap = null;
+    game.speedMul = 4;
+    game.beforeTick = (s) => {
+      if (until && s.t < until) {
+        if (!spaceDown) {
+          send('keydown', 'Space');
+          spaceDown = true;
+        }
+        return;
+      }
+      if (spaceDown) {
+        send('keyup', 'Space');
+        spaceDown = false;
+      }
+      if (!game.__ap || game.__apSim !== game.sim) {
+        game.__ap = L.autopilot.createAutopilot(game.day, game.sim);
+        game.__apSim = game.sim;
+        game.__ap.replan();
+      }
+      const want = game.__ap.input();
+      for (const [bit, code] of codes) {
+        if (want & bit && !(held & bit)) send('keydown', code);
+        if (!(want & bit) && held & bit) send('keyup', code);
+      }
+      held = want;
+    };
+  }, dawdleUntil || 0);
+}
+
+async function playDay(label, { dawdle = false } = {}) {
+  await waitScreen('briefing');
+  await page.waitForTimeout(600);
+  await shot(`${label}-briefing`);
+  const info = await page.evaluate(() => {
+    const g = window.__late;
+    return { seed: g.day.seed, start: g.day.startTime, par: g.day.par.arrival, weekday: g.weekday, checkpoints: g.day.checkpoints.length, policy: g.policy.day };
+  });
+  // a fresh start: no autopilot hook from the previous day, no keys held
+  await page.evaluate(() => {
+    const g = window.__late;
+    g.beforeTick = null;
+    g.speedMul = 1;
+    for (const code of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'KeyE', 'Space']) window.dispatchEvent(new KeyboardEvent('keyup', { code, key: code }));
+  });
+  await page.click('[data-testid="leave-home"]');
+  await waitScreen('play');
+  // keyboard sanity check before the autopilot takes over: holding → must move the player
+  const x0 = await page.evaluate(() => window.__late.sim.state.x);
+  await page.keyboard.down(info.start ? 'ArrowRight' : 'ArrowRight');
+  await page.waitForTimeout(400);
+  await page.keyboard.up('ArrowRight');
+  const x1 = await page.evaluate(() => window.__late.sim.state.x);
+  if (x1 === x0) throw new Error('keyboard input did not move the player');
+  await drive(dawdle ? 9 * 3600 + 60 : 0);
+  // screenshots along the way: in a station and on a train
+  let sawTrain = false;
+  let sawStation = false;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 300000) {
+    const st = await page.evaluate(() => ({ screen: window.__late.screen, mode: window.__late.sim && window.__late.sim.state.mode, t: window.__late.sim && window.__late.sim.state.t }));
+    if (st.screen === 'result') break;
+    if (st.mode === 'train' && !sawTrain) {
+      await page.waitForTimeout(250);
+      await shot(`${label}-train`);
+      sawTrain = true;
+    } else if (st.mode === 'walk' && sawTrain && !sawStation) {
+      await page.waitForTimeout(200);
+      await shot(`${label}-transfer`);
+      sawStation = true;
+    }
+    await page.waitForTimeout(150);
+  }
+  await waitScreen('result', 10000);
+  await page.waitForTimeout(700);
+  await shot(`${label}-result`);
+  const r = await page.evaluate(() => {
+    const g = window.__late;
+    const res = g.lastResult;
+    const stamp = document.querySelector('.stamp');
+    return { arrival: res.arrival, margin: res.margin, late: res.late, how: res.how, stamp: stamp && stamp.textContent, heading: document.querySelector('.result h2').textContent, ticks: res.ticks, inputs: res.inputs.length };
+  });
+  // the recorded inputs must replay to exactly the same arrival (what the leaderboard relies on)
+  const replay = await page.evaluate(() => {
+    const g = window.__late;
+    const again = window.Late.sim.replay(g.day, g.lastResult.inputs);
+    return again.result ? again.result.arrival : null;
+  });
+  const fmt = (t) => (t === null ? '—' : new Date(t * 1000).toISOString().slice(11, 19));
+  console.log(`${label}: seed ${info.seed} (${info.policy}, ${info.checkpoints} checkpoints) left ${fmt(info.start)} → ${r.how} ${fmt(r.arrival)} (par ${fmt(info.par)}), margin ${Math.round(r.margin)} s, stamp "${r.stamp}", replay ${fmt(replay)}`);
+  if (replay !== r.arrival) throw new Error(`replay mismatch: ${replay} vs ${r.arrival}`);
+  return { ...r, info };
+}
+
+try {
+  await page.goto(url);
+  await waitScreen('title', 20000);
+  await page.waitForTimeout(800);
+  await shot('title');
+  const results = [];
+  if (flag('--late')) {
+    await page.evaluate((seed) => window.__late.startCustom(seed, 1), seedArg);
+    const r = await playDay('late', { dawdle: true });
+    if (!r.late || !/LATE/.test(r.stamp)) throw new Error('expected a LATE result');
+    results.push(r);
+  } else {
+    await page.evaluate((seed) => window.__late.startWeek(seed), seedArg);
+    const days = flag('--week') ? 5 : 1;
+    for (let d = 0; d < days; d++) {
+      const r = await playDay(['mon', 'tue', 'wed', 'thu', 'fri'][d]);
+      if (r.how !== 'office' || r.late || !/ON TIME/.test(r.stamp)) throw new Error(`expected an ON TIME arrival on day ${d + 1}`);
+      results.push(r);
+      if (d < days - 1) {
+        await page.click('[data-testid="next-day"]');
+        await waitScreen('shop');
+        await shot(`shop-${d + 1}`);
+        await page.click('[data-testid="sleep"]');
+      }
+    }
+    if (days === 5) {
+      await page.click('[data-testid="next-day"]');
+      await waitScreen('week');
+      await page.waitForTimeout(400);
+      await shot('week-summary');
+    }
+  }
+  if (errors.length) throw new Error(`page errors:\n${errors.join('\n')}`);
+  console.log(`PASS — ${results.length} day(s) played in the browser`);
+} catch (e) {
+  console.error('FAIL', e.message);
+  if (errors.length) console.error(errors.join('\n'));
+  await shot('failure');
+  process.exitCode = 1;
+} finally {
+  await browser.close();
+}

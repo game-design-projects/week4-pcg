@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Late — a subway transfer maze</title>
+  <meta name="description" content="Late: get to the office before 09:00 through a procedurally generated, multi-level subway network. NYU Game Design Week 4 PCG prototype." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%23e5484d'/%3E%3Cpath d='M32 14v19l12 7' stroke='white' stroke-width='6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&display=swap" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" aria-label="Late — game view"></canvas>
+    <div id="overlay" hidden></div>
+    <div id="touch"></div>
+  </div>
+  <noscript>Late needs JavaScript.</noscript>
+
+  <!-- Plain scripts (no modules, no build step) so the page also works when
+       opened straight from disk. The core files are the same ones Node's
+       tests and the leaderboard Worker load with require(). -->
+  <script src="src/core/rules.js"></script>
+  <script src="src/core/rng.js"></script>
+  <script src="src/core/names.js"></script>
+  <script src="src/core/network.js"></script>
+  <script src="src/core/interior.js"></script>
+  <script src="src/core/timetable.js"></script>
+  <script src="src/core/solver.js"></script>
+  <script src="src/core/difficulty.js"></script>
+  <script src="src/core/day.js"></script>
+  <script src="src/core/sim.js"></script>
+  <script src="src/core/autopilot.js"></script>
+  <script src="src/core/display.js"></script>
+  <script src="src/core/wayfinding.js"></script>
+  <script src="src/core/excuses.js"></script>
+
+  <script src="src/ui/atlas.js"></script>
+  <script src="src/ui/gfx.js"></script>
+  <script src="src/ui/audio.js"></script>
+  <script src="src/ui/input.js"></script>
+  <script src="src/ui/view-map.js"></script>
+  <script src="src/ui/view-station.js"></script>
+  <script src="src/ui/view-train.js"></script>
+  <script src="src/ui/hud.js"></script>
+  <script src="src/ui/screens.js"></script>
+  <script src="src/ui/game.js"></script>
+</body>
+</html>
