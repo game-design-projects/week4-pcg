@@ -6,6 +6,7 @@
   const SPRITE_PX = 50;     // diver sprite pixels per cell
   const PROP_PX = 30;       // prop sprite pixels per cell
   const CHUNK = 32;
+  const PAD = 16, PAD_TOP = 48;   // solid rock drawn around the grid, and room above the pool for the sky
   const AMBER = '#f0a238';
   const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -102,19 +103,42 @@
   Renderer.prototype.setDive = function (game) {
     const d = game.d;
     this.game = game;
-    this.field = smoothField(d.open, d.W, d.H);
+    // The rock is drawn from a padded copy of the grid: solid rock all around,
+    // except a shaft of open air above the pool, so the walls and the shading
+    // run on past the edges of the grid with no seam.
+    const PW = d.W + 2 * PAD, PH = d.H + PAD_TOP + PAD;
+    const mask = new Uint8Array(PW * PH);
+    for (let y = 0; y < d.H; y++) for (let x = 0; x < d.W; x++) mask[(y + PAD_TOP) * PW + x + PAD] = d.open[y * d.W + x];
+    let s0 = -1, s1 = -1;
+    for (let x = 0; x < C.BASIN_W; x++) if (d.open[d.W + x]) { if (s0 < 0) s0 = x; s1 = x; }
+    this.shaft = null;
+    if (s0 >= 0) {
+      // Row 0 and the air above the pool: a sinkhole that opens out a little
+      // as it rises, with rough walls.
+      const rough = (y, side) => ((Math.imul(y * 7 + side, 0x9e3779b1) >>> 29) & 1);
+      let top = null;
+      for (let y = 0; y >= -PAD_TOP; y--) {
+        const flare = Math.floor(-y / 6);
+        const a = Math.max(-PAD + 1, s0 - flare - rough(y, 1)), b = Math.min(d.W + PAD - 2, s1 + flare + rough(y, 2));
+        for (let x = a; x <= b; x++) mask[(y + PAD_TOP) * PW + x + PAD] = 1;
+        top = { x0: a + 0.5, x1: b + 0.5 };
+      }
+      this.shaft = { x0: s0 + 0.5, x1: s1 + 0.5, top };
+    }
+    this.pad = { W: PW, H: PH, mask };
+    this.field = smoothField(mask, PW, PH);
     this.chunks = new Map();
     this.silt = document.createElement('canvas');
     this.silt.width = d.W; this.silt.height = d.H;
     this.siltImg = this.silt.getContext('2d').createImageData(d.W, d.H);
     this.map = renderSurvey(d, 4);
     // Rock fades to black away from the passage, so only the walls show texture.
-    const inv = new Uint8Array(d.W * d.H);
-    for (let i = 0; i < inv.length; i++) inv[i] = d.open[i] ? 0 : 1;
-    const depth = Gen.clearanceMap(inv, d.W, d.H);
+    const inv = new Uint8Array(PW * PH);
+    for (let i = 0; i < inv.length; i++) inv[i] = mask[i] ? 0 : 1;
+    const depth = Gen.clearanceMap(inv, PW, PH);
     this.shade = document.createElement('canvas');
-    this.shade.width = d.W; this.shade.height = d.H;
-    const sctx = this.shade.getContext('2d'), img = sctx.createImageData(d.W, d.H);
+    this.shade.width = PW; this.shade.height = PH;
+    const sctx = this.shade.getContext('2d'), img = sctx.createImageData(PW, PH);
     for (let i = 0; i < inv.length; i++) {
       img.data[i * 4] = 3; img.data[i * 4 + 1] = 7; img.data[i * 4 + 2] = 11;
       img.data[i * 4 + 3] = inv[i] ? 255 * clamp((depth[i] - 0.6) / 3.5, 0, 0.96) : 0;
@@ -131,15 +155,18 @@
     const key = cx + ',' + cy;
     let ch = this.chunks.get(key);
     if (ch) return ch;
+    // Chunks are in padded coordinates; draw() shifts them back onto the grid.
     const d = this.game.d, x0 = cx * CHUNK, y0 = cy * CHUNK;
     const rock = new Path2D(), edge = new Path2D(), beds = [new Path2D(), new Path2D(), new Path2D()];
-    contour(this.field, d.W, d.H, x0, y0, x0 + CHUNK, y0 + CHUNK, 0.5, rock, edge);
-    for (let y = y0; y < Math.min(d.H - 1, y0 + CHUNK); y++) for (let x = x0; x < Math.min(d.W, x0 + CHUNK); x++) {
+    contour(this.field, this.pad.W, this.pad.H, x0, y0, x0 + CHUNK, y0 + CHUNK, 0.5, rock, edge);
+    for (let py = y0; py < y0 + CHUNK; py++) for (let px = x0; px < x0 + CHUNK; px++) {
+      const x = px - PAD, y = py - PAD_TOP;
+      if (x < 0 || y < 0 || x >= d.W || y >= d.H - 1) continue;
       const dep = d.deposit[y * d.W + x];
       if (dep < 0.15 || d.open[(y + 1) * d.W + x]) continue;
       const b = beds[dep > 0.8 ? 2 : dep > 0.45 ? 1 : 0];
-      b.moveTo(x + 1.4, y + 1.12);
-      b.ellipse(x + 0.5, y + 1.12, 0.9, 0.3, 0, 0, Math.PI * 2);
+      b.moveTo(px + 1.4, py + 1.12);
+      b.ellipse(px + 0.5, py + 1.12, 0.9, 0.3, 0, 0, Math.PI * 2);
     }
     ch = { rock, edge, beds };
     this.chunks.set(key, ch);
@@ -168,8 +195,10 @@
 
   Renderer.prototype.draw = function (dt, ui) {
     const g = this.game, d = g.d, ctx = this.ctx, dv = g.diver;
+    // Facing as an angle, for drawing only (the simulation keeps a unit vector).
+    this.face = Math.atan2(dv.fy, dv.fx);
     // Camera leads the diver a little in the direction they face.
-    const tx = dv.x + Math.cos(dv.face) * 4, ty = dv.y + Math.sin(dv.face) * 2;
+    const tx = dv.x + Math.cos(this.face) * 4, ty = dv.y + Math.sin(this.face) * 2;
     const k = Math.min(1, dt * 3);
     this.cam.x += (tx - this.cam.x) * k; this.cam.y += (ty - this.cam.y) * k;
     const halfW = this.w / 2 / this.px, halfH = this.h / 2 / this.px;
@@ -185,13 +214,31 @@
     ctx.fillRect(0, 0, this.w, this.h);
 
     this.worldTransform(ctx, 1);
+    // Daylight in the shaft above the pool, drawn before the rock so the
+    // shaft walls cut it off.
+    const sh = this.shaft, SURFACE = 0.4;
+    if (sh && vy0 < SURFACE) {
+      const sky = ctx.createLinearGradient(0, SURFACE - 14, 0, SURFACE);
+      sky.addColorStop(0, '#5f9ea3'); sky.addColorStop(0.75, '#b9e2de'); sky.addColorStop(1, '#dff5f1');
+      ctx.fillStyle = sky;
+      ctx.fillRect(sh.top.x0 - 2, vy0 - 1, sh.top.x1 - sh.top.x0 + 4, SURFACE - vy0 + 1);
+      const below = ctx.createLinearGradient(0, SURFACE, 0, SURFACE + 5);
+      below.addColorStop(0, 'rgba(210,240,236,0.35)'); below.addColorStop(1, 'rgba(210,240,236,0)');
+      ctx.fillStyle = below;
+      ctx.fillRect(sh.x0 - 2, SURFACE, sh.x1 - sh.x0 + 4, 5);
+      ctx.strokeStyle = 'rgba(236,252,250,0.85)'; ctx.lineWidth = 0.1;
+      ctx.beginPath(); ctx.moveTo(sh.x0 - 2, SURFACE); ctx.lineTo(sh.x1 + 2, SURFACE); ctx.stroke();
+    }
     const cks = [];
-    for (let cy = Math.floor(vy0 / CHUNK); cy <= Math.floor(vy1 / CHUNK); cy++) {
-      for (let cx = Math.floor(vx0 / CHUNK); cx <= Math.floor(vx1 / CHUNK); cx++) {
-        if (cx < 0 || cy < 0 || cx * CHUNK >= d.W || cy * CHUNK >= d.H) continue;
+    const pvx0 = vx0 + PAD, pvx1 = vx1 + PAD, pvy0 = vy0 + PAD_TOP, pvy1 = vy1 + PAD_TOP;
+    for (let cy = Math.floor(pvy0 / CHUNK); cy <= Math.floor(pvy1 / CHUNK); cy++) {
+      for (let cx = Math.floor(pvx0 / CHUNK); cx <= Math.floor(pvx1 / CHUNK); cx++) {
+        if (cx < 0 || cy < 0 || cx * CHUNK >= this.pad.W || cy * CHUNK >= this.pad.H) continue;
         cks.push(this.chunk(cx, cy));
       }
     }
+    ctx.save();
+    ctx.translate(-PAD, -PAD_TOP);
     // Silt beds on the floor, then rock on top so only their upper edge shows.
     const bedColors = ['rgba(120,112,88,0.22)', 'rgba(128,118,92,0.34)', 'rgba(136,124,96,0.46)'];
     for (const ch of cks) ch.beds.forEach((b, i) => { ctx.fillStyle = bedColors[i]; ctx.fill(b); });
@@ -203,30 +250,26 @@
     }
     ctx.imageSmoothingEnabled = true;
     {
-      const sx = clamp(Math.floor(vx0), 0, d.W - 1), sy = clamp(Math.floor(vy0), 0, d.H - 1);
-      const sw = clamp(Math.ceil(vx1), 1, d.W) - sx, sh = clamp(Math.ceil(vy1), 1, d.H) - sy;
-      if (sw > 0 && sh > 0) ctx.drawImage(this.shade, sx, sy, sw, sh, sx, sy, sw, sh);
-    }
-    // Solid rock beyond the edges of the grid.
-    if (vx0 < 0 || vy0 < 0 || vx1 > d.W || vy1 > d.H) {
-      const outside = new Path2D();
-      outside.rect(vx0 - 5, vy0 - 5, vx1 - vx0 + 10, vy1 - vy0 + 10);
-      outside.rect(0, 0, d.W, d.H);
-      ctx.fillStyle = '#03070b';
-      ctx.fill(outside, 'evenodd');
+      const sx = clamp(Math.floor(pvx0), 0, this.pad.W - 1), sy = clamp(Math.floor(pvy0), 0, this.pad.H - 1);
+      const sw = clamp(Math.ceil(pvx1), 1, this.pad.W) - sx, shh = clamp(Math.ceil(pvy1), 1, this.pad.H) - sy;
+      if (sw > 0 && shh > 0) ctx.drawImage(this.shade, sx, sy, sw, shh, sx, sy, sw, shh);
     }
     ctx.lineCap = 'round';
     for (const ch of cks) {
       ctx.strokeStyle = 'rgba(8,14,20,0.9)'; ctx.lineWidth = 0.5; ctx.stroke(ch.edge);
       ctx.strokeStyle = 'rgba(122,156,166,0.45)'; ctx.lineWidth = 0.14; ctx.stroke(ch.edge);
     }
-
-    // The pool's surface: the only open air in the whole dive.
-    if (vy0 < 2) {
-      const sky = ctx.createLinearGradient(0, -6, 0, 1.4);
-      sky.addColorStop(0, '#6fa9ad'); sky.addColorStop(0.8, '#cdeeea'); sky.addColorStop(1, 'rgba(160,215,215,0)');
-      ctx.fillStyle = sky;
-      ctx.fillRect(2, vy0 - 5, C.BASIN_W - 3.5, 1.4 - (vy0 - 5));
+    ctx.restore();
+    // Solid rock beyond the padding (the same colour as the shaded rock there),
+    // leaving the shaft of daylight open all the way up.
+    const px0 = -PAD + 0.5, py0 = -PAD_TOP + 0.5, px1 = d.W + PAD - 0.5, py1 = d.H + PAD - 0.5;
+    if (vx0 < px0 || vy0 < py0 || vx1 > px1 || vy1 > py1) {
+      const outside = new Path2D();
+      outside.rect(vx0 - 5, vy0 - 5, vx1 - vx0 + 10, vy1 - vy0 + 10);
+      outside.rect(px0, py0, px1 - px0, py1 - py0);
+      if (sh && vy0 < py0) outside.rect(sh.top.x0, vy0 - 5, sh.top.x1 - sh.top.x0, py0 - (vy0 - 5));
+      ctx.fillStyle = '#04080c';
+      ctx.fill(outside, 'evenodd');
     }
 
     this.drawProps(ctx, vx0, vx1, vy0, vy1);
@@ -358,7 +401,7 @@
     const img = this.art[name];
     ctx.save();
     ctx.translate(dv.x, dv.y);
-    let a = dv.face;
+    let a = this.face;
     if (Math.cos(a) < 0) { ctx.scale(-1, 1); a = Math.PI - a; }
     while (a > Math.PI) a -= 2 * Math.PI;
     while (a < -Math.PI) a += 2 * Math.PI;
@@ -386,12 +429,13 @@
     l.globalCompositeOperation = 'destination-out';
     this.worldTransform(l, S);
 
-    const day = l.createRadialGradient(C.BASIN_W / 2, -8, 2, C.BASIN_W / 2, -8, 38);
+    const dayX = this.shaft ? (this.shaft.x0 + this.shaft.x1) / 2 : C.BASIN_W / 2;
+    const day = l.createRadialGradient(dayX, -8, 2, dayX, -8, 38);
     day.addColorStop(0, 'rgba(0,0,0,0.97)'); day.addColorStop(0.6, 'rgba(0,0,0,0.75)'); day.addColorStop(1, 'rgba(0,0,0,0)');
     l.fillStyle = day;
-    l.fillRect(-10, -10, C.BASIN_W + 40, 60);
+    l.fillRect(dayX - 38, -46, 76, 76);
 
-    const hx = dv.x + Math.cos(dv.face) * 1.3, hy = dv.y + Math.sin(dv.face) * 1.3 - 0.25;
+    const hx = dv.x + Math.cos(this.face) * 1.3, hy = dv.y + Math.sin(this.face) * 1.3 - 0.25;
     const halo = l.createRadialGradient(dv.x, dv.y, 0, dv.x, dv.y, 4.5);
     halo.addColorStop(0, 'rgba(0,0,0,0.7)'); halo.addColorStop(1, 'rgba(0,0,0,0)');
     l.fillStyle = halo;
@@ -403,7 +447,7 @@
       grad.addColorStop(0, `rgba(0,0,0,${a0})`); grad.addColorStop(0.35, `rgba(0,0,0,${a0 * 0.9})`);
       grad.addColorStop(0.7, `rgba(0,0,0,${a0 * 0.45})`); grad.addColorStop(1, 'rgba(0,0,0,0)');
       l.fillStyle = grad;
-      l.beginPath(); l.moveTo(hx, hy); l.arc(hx, hy, len, dv.face - half, dv.face + half); l.closePath(); l.fill();
+      l.beginPath(); l.moveTo(hx, hy); l.arc(hx, hy, len, this.face - half, this.face + half); l.closePath(); l.fill();
     };
     cone(0.95, reach * 0.65, 0.4);
     cone(0.27, reach * 1.15, 1);
@@ -419,11 +463,11 @@
     const warm = ctx.createRadialGradient(hx, hy, 0, hx, hy, reach);
     warm.addColorStop(0, 'rgba(255,214,150,0.16)'); warm.addColorStop(1, 'rgba(255,214,150,0)');
     ctx.fillStyle = warm;
-    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.arc(hx, hy, reach, dv.face - 0.27, dv.face + 0.27); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.arc(hx, hy, reach, this.face - 0.27, this.face + 0.27); ctx.closePath(); ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
-    const s = g.siltAt(hx, hy) + g.siltAt(hx + Math.cos(dv.face) * 2, hy + Math.sin(dv.face) * 2);
+    const s = g.siltAt(hx, hy) + g.siltAt(hx + Math.cos(this.face) * 2, hy + Math.sin(this.face) * 2);
     if (s > 0.12) {
-      const gx = hx + Math.cos(dv.face) * 1.2, gy = hy + Math.sin(dv.face) * 1.2;
+      const gx = hx + Math.cos(this.face) * 1.2, gy = hy + Math.sin(this.face) * 1.2;
       const r = Math.min(6.5, 3.2 + s);
       const glare = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
       glare.addColorStop(0, `rgba(196,186,156,${Math.min(0.75, s * 0.32)})`); glare.addColorStop(1, 'rgba(196,186,156,0)');
@@ -464,32 +508,7 @@
     ctx.font = '600 13px system-ui, -apple-system, Segoe UI, sans-serif';
     ctx.textBaseline = 'alphabetic';
 
-    // Gas gauge, split into thirds.
-    const x = 18, y = 18, w = 250;
-    panel(ctx, x - 10, y - 10, w + 20, 88);
-    ctx.fillStyle = '#9fb7bf'; ctx.fillText('GAS', x, y + 10);
-    ctx.fillStyle = g.gas <= B.reserve ? '#ff8a6a' : g.gas <= B.turn ? '#ffc46b' : '#e8f1f2';
-    ctx.font = '700 20px system-ui, -apple-system, Segoe UI, sans-serif';
-    ctx.fillText(`${Math.ceil(g.gas)} bar`, x + 36, y + 12);
-    ctx.font = '600 12px system-ui, -apple-system, Segoe UI, sans-serif';
-    ctx.fillStyle = '#9fb7bf';
-    ctx.textAlign = 'right'; ctx.fillText(`turn at ${Math.round(B.turn)}`, x + w, y + 10); ctx.textAlign = 'left';
-    const by = y + 22, bh = 10;
-    const thirds = [['rgba(120,50,44,0.8)', 0, 1 / 3], ['rgba(40,70,80,0.9)', 1 / 3, 2 / 3], ['rgba(52,92,104,0.9)', 2 / 3, 1]];
-    for (const [c, a, b] of thirds) { ctx.fillStyle = c; ctx.fillRect(x + w * a, by, w * (b - a) - 1, bh); }
-    ctx.fillStyle = g.gas <= B.reserve ? '#ff8a6a' : AMBER;
-    ctx.fillRect(x, by + 2, w * (g.gas / B.P0), bh - 4);
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(x + w * (B.turn / B.P0) - 1, by - 3, 2, bh + 6);
-
-    ctx.font = '600 13px system-ui, -apple-system, Segoe UI, sans-serif';
-    ctx.fillStyle = '#cfe0e3';
-    ctx.fillText(`DEPTH ${g.depth().toFixed(0)} m`, x, y + 52);
-    ctx.fillText(`TIME ${root.CaveGame.fmt(g.t)}`, x + 100, y + 52);
-    // The reel, with how much line is left on it.
-    const reelM = Math.max(0, Math.round(g.reel.left * C.CELL_M));
-    if (this.art.spool) ctx.drawImage(this.art.spool, x + 184, y + 36, 22, 19);
-    ctx.fillText(`${reelM} m`, x + 210, y + 52);
+    // Status chips go under the gauge; the panel grows to fit them.
     const chips = [];
     if (g.hold) chips.push(['ON LINE', AMBER]);
     if (g.reel.active !== null) chips.push(['LAYING LINE', '#f6c566']);
@@ -499,21 +518,58 @@
     if (g.diver.tight) chips.push(['TIGHT', '#c9d6da']);
     if (g.lamp.vis < root.CaveGame.ZERO_VIS) chips.push(['ZERO VIS', '#ff8a6a']);
     if (g.goalTagged) chips.push(['END TAGGED', '#ffd48a']);
-    let cx = x, cy = y + 60;
+    const x = 18, y = 18, w = 280;
     ctx.font = '700 11px system-ui, -apple-system, Segoe UI, sans-serif';
+    const placed = [];
+    let cx = x, cy = y + 66;
     for (const [text, color] of chips) {
       const tw = ctx.measureText(text).width + 12;
-      if (cx > x && cx + tw > x + w + 4) { cx = x; cy += 22; }
-      ctx.fillStyle = 'rgba(6,16,24,0.62)'; ctx.fillRect(cx, cy, tw, 18);
-      ctx.strokeStyle = color; ctx.lineWidth = 1;
-      ctx.strokeRect(cx + 0.5, cy + 0.5, tw, 17);
-      ctx.fillStyle = color; ctx.fillText(text, cx + 6, cy + 13);
+      if (cx > x && cx + tw > x + w) { cx = x; cy += 24; }
+      placed.push([text, color, cx, cy, tw]);
       cx += tw + 6;
+    }
+    const bottom = placed.length ? cy + 18 + 12 : y + 58 + 12;
+    panel(ctx, x - 10, y - 10, w + 20, bottom - (y - 10));
+
+    // Gas gauge, split into thirds.
+    ctx.font = '600 13px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.fillStyle = '#9fb7bf'; ctx.fillText('GAS', x, y + 12);
+    ctx.fillStyle = g.gas <= B.reserve ? '#ff8a6a' : g.gas <= B.turn ? '#ffc46b' : '#e8f1f2';
+    ctx.font = '700 20px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.fillText(`${g.gas > 0 ? Math.max(1, Math.round(g.gas)) : 0} bar`, x + 36, y + 14);   // rounded like the results screen
+    ctx.font = '600 12px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.fillStyle = '#9fb7bf';
+    ctx.textAlign = 'right'; ctx.fillText(`turn at ${Math.round(B.turn)}`, x + w, y + 12); ctx.textAlign = 'left';
+    const by = y + 24, bh = 10;
+    const thirds = [['rgba(120,50,44,0.8)', 0, 1 / 3], ['rgba(40,70,80,0.9)', 1 / 3, 2 / 3], ['rgba(52,92,104,0.9)', 2 / 3, 1]];
+    for (const [c, a, b] of thirds) { ctx.fillStyle = c; ctx.fillRect(x + w * a, by, w * (b - a) - 1, bh); }
+    ctx.fillStyle = g.gas <= B.reserve ? '#ff8a6a' : AMBER;
+    ctx.fillRect(x, by + 2, w * (g.gas / B.P0), bh - 4);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(x + w * (B.turn / B.P0) - 1, by - 3, 2, bh + 6);
+
+    // Depth and time on the left, the reel and the line left on it on the right.
+    ctx.font = '600 13px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.fillStyle = '#cfe0e3';
+    const ty = y + 56;
+    ctx.fillText(`DEPTH ${g.depth().toFixed(0)} m`, x, ty);
+    // Room for a two-digit depth, so TIME doesn't move as the depth changes.
+    ctx.fillText(`TIME ${root.CaveGame.fmt(g.t)}`, x + ctx.measureText('DEPTH 88 m').width + 16, ty);
+    const reelText = `${Math.max(0, Math.round(g.reel.left * C.CELL_M))} m`;
+    ctx.textAlign = 'right'; ctx.fillText(reelText, x + w, ty); ctx.textAlign = 'left';
+    if (this.art.spool) ctx.drawImage(this.art.spool, x + w - ctx.measureText(reelText).width - 26, ty - 15, 21, 18);
+
+    ctx.font = '700 11px system-ui, -apple-system, Segoe UI, sans-serif';
+    for (const [text, color, px, py, tw] of placed) {
+      ctx.fillStyle = 'rgba(6,16,24,0.62)'; ctx.fillRect(px, py, tw, 18);
+      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      ctx.strokeRect(px + 0.5, py + 0.5, tw - 1, 17);
+      ctx.fillStyle = color; ctx.fillText(text, px + 6, py + 13);
     }
     if (g.felt) {
       ctx.font = '600 13px system-ui, -apple-system, Segoe UI, sans-serif';
       ctx.fillStyle = g.felt.out ? '#ffe0a8' : '#ff8a6a';
-      ctx.fillText(g.felt.out ? 'Hand on the line: the arrow shows the way back to the entrance.' : 'Hand on a line that does not lead back to the entrance.', x, cy + 42);
+      ctx.fillText(g.felt.out ? 'Hand on the line: the arrow shows the way back to the entrance.' : 'Hand on a line that does not lead back to the entrance.', x - 2, bottom + 22);
     }
     if (g.tutorial) this.drawTutorial(ctx);
 
@@ -583,7 +639,8 @@
     const g = this.game, m = this.map, d = g.d;
     ctx.fillStyle = 'rgba(2,8,14,0.78)';
     ctx.fillRect(0, 0, this.w, this.h);
-    const s = Math.min((this.w - 60) / m.width, (this.h - 110) / m.height);
+    // Fit the screen, but don't blow a small cave's survey (and its labels) up past 1.6x.
+    const s = Math.min((this.w - 60) / m.width, (this.h - 110) / m.height, 1.6);
     const w = m.width * s, h = m.height * s, x = (this.w - w) / 2, y = (this.h - h) / 2 + 10;
     ctx.drawImage(m, x, y, w, h);
     const X = (wx) => x + (wx / d.W) * w, Y = (wy) => y + ((wy - m.cropY0) / m.cropH) * h;
@@ -614,7 +671,8 @@
     // Crop to the rows the cave actually uses.
     let minY = d.H, maxY = 0;
     for (let i = 0; i < d.open.length; i++) if (d.open[i]) { const y = (i / d.W) | 0; if (y < minY) minY = y; if (y > maxY) maxY = y; }
-    const y0 = 0, y1 = Math.min(d.H, maxY + 8);
+    const M = 7;                           // rows of margin above the water surface
+    const y0 = -M, y1 = Math.min(d.H, maxY + 8);
     const cv = document.createElement('canvas');
     cv.width = d.W * scale; cv.height = (y1 - y0) * scale;
     cv.cropY0 = y0; cv.cropH = y1 - y0;
@@ -624,14 +682,18 @@
     ctx.strokeStyle = 'rgba(120,160,180,0.06)';
     ctx.lineWidth = 1;
     for (let x = 0; x < cv.width; x += 10 * scale) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, cv.height); ctx.stroke(); }
-    for (let y = 0; y < cv.height; y += 10 * scale) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cv.width, y); ctx.stroke(); }
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    for (let y = M * scale; y < cv.height; y += 10 * scale) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cv.width, y); ctx.stroke(); }
+    ctx.setTransform(scale, 0, 0, scale, 0, M * scale);
 
     const N = d.W * d.H;
     const inv = (f) => { for (let i = 0; i < f.length; i++) f[i] = 1 - f[i]; return f; };
 
     // Passages: depth bands (lighter = shallower), lighter near the walls.
-    const sf = inv(smoothField(d.open, d.W, d.H));
+    // The pool is open to the surface (row 0 is rock only in the grid).
+    const open = d.open.slice();
+    let s0 = -1, s1 = -1;
+    for (let x = 0; x < C.BASIN_W; x++) if (d.open[d.W + x]) { open[x] = 1; if (s0 < 0) s0 = x; s1 = x; }
+    const sf = inv(smoothField(open, d.W, d.H));
     const fill = new Path2D(), edge = new Path2D();
     contour(sf, d.W, d.H, 0, 0, d.W, d.H, 0.5, fill, edge);
     const small = document.createElement('canvas');
@@ -655,6 +717,11 @@
     ctx.lineCap = 'round';
     ctx.strokeStyle = 'rgba(10,18,24,0.95)'; ctx.lineWidth = 0.9; ctx.stroke(edge);
     ctx.strokeStyle = 'rgba(190,210,205,0.55)'; ctx.lineWidth = 0.25; ctx.stroke(edge);
+    if (s0 >= 0) {
+      // The water surface in the entrance pool.
+      ctx.strokeStyle = 'rgba(220,245,240,0.8)'; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(s0 + 0.2, 0.5); ctx.lineTo(s1 + 0.8, 0.5); ctx.stroke();
+    }
 
     // The tie-off post.
     ctx.strokeStyle = AMBER; ctx.lineWidth = 0.6;
@@ -663,15 +730,30 @@
     ctx.fillStyle = '#ffd48a';
     ctx.beginPath(); ctx.rect(d.goal.x - 1.2, d.goal.y - 0.8, 2.4, 1.6); ctx.fill();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const Y = (wy) => (wy - y0) * scale;
     ctx.font = `700 ${Math.round(scale * 3.2)}px system-ui, sans-serif`;
     ctx.fillStyle = '#e8f1f2';
-    ctx.fillText('ENTRANCE', 2 * scale, 30 * scale);
-    ctx.fillText('END CHAMBER', (d.goal.x - 7) * scale, (d.goal.y + 10) * scale);
-    for (let m = 10; m / C.CELL_M < y1 - 2; m += 10) {
-      ctx.fillStyle = 'rgba(160,190,200,0.5)';
-      ctx.font = `600 ${Math.round(scale * 2.4)}px system-ui, sans-serif`;
-      ctx.fillText(`${m} m`, cv.width - 9 * scale, (m / C.CELL_M) * scale);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText('ENTRANCE', ((s0 + s1 + 1) / 2) * scale, Y(-M / 2));
+    // END CHAMBER goes on whichever side of the chamber covers the least passage.
+    const tw = ctx.measureText('END CHAMBER').width / scale, th = 3.4;
+    let best = null;
+    for (const [dx, dy] of [[0, -5], [0, 5], [tw / 2 + 4, 0], [-tw / 2 - 4, 0]]) {
+      const cx = clamp(d.goal.x + dx, tw / 2 + 1, d.W - tw / 2 - 1), cy = clamp(d.goal.y + dy, y0 + th, y1 - th);
+      let cover = 0;
+      for (let yy = Math.floor(cy - th / 2); yy <= cy + th / 2; yy++) for (let xx = Math.floor(cx - tw / 2); xx <= cx + tw / 2; xx++) {
+        if (yy >= 0 && yy < d.H && xx >= 0 && xx < d.W && d.open[yy * d.W + xx]) cover++;
+      }
+      if (!best || cover < best.cover) best = { cx, cy, cover };
     }
+    ctx.fillText('END CHAMBER', best.cx * scale, Y(best.cy));
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(160,190,200,0.55)';
+    ctx.font = `600 ${Math.round(scale * 2.4)}px system-ui, sans-serif`;
+    for (let m = 10; m / C.CELL_M < y1 - 2; m += 10) ctx.fillText(`${m} m`, cv.width - 2 * scale, Y(m / C.CELL_M));
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
     return cv;
   }
 
