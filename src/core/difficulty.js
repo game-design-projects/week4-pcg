@@ -50,6 +50,16 @@
     { day: 'Fri', zh: '周五', lines: 6, hubFlavors: ['maze', 'deep', 'split'], minTransfers: 2, maxTransfers: 3, hubOnRoute: true, checkpoints: 4, disruptions: 2, slack: 180, irregularShare: 0.6, reversibleShare: 0.4, mazeTransferShare: 0.4 },
   ];
 
+  // Day 0: the tutorial. A small city (three lines, all through the hub), one
+  // change of line, no checkpoints or closures, and a quarter of an hour to
+  // spare, so a new player can learn the controls without the clock biting.
+  const TUTORIAL = Object.freeze({ day: 'Day 0', zh: '入职', lines: 3, hubFlavors: ['sprawl'], sprawlGap: [60, 110], minTransfers: 1, maxTransfers: 1, checkpoints: 0, disruptions: 0, slack: 900, irregularShare: 0, reversibleShare: 0, mazeTransferShare: 0, minTrip: 12 * 60, maxTrip: 30 * 60 });
+  const TUTORIAL_SEED = 'DAY-ZERO';
+
+  function tutorialParams() {
+    return { ...BASE, ...TUTORIAL };
+  }
+
   /** Full generator params for weekday 0..4, plus optional Director adjustments. */
   function paramsFor(weekday, adjust) {
     const w = WEEK[Math.max(0, Math.min(4, weekday))];
@@ -81,5 +91,5 @@
     return adjust;
   }
 
-  return { BASE, WEEK, paramsFor, direct };
+  return { BASE, WEEK, TUTORIAL, TUTORIAL_SEED, tutorialParams, paramsFor, direct };
 });

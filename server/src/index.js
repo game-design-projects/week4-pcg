@@ -23,7 +23,7 @@ const MAX_BODY_BYTES = 128 * 1024;
 const PLAYER_ID_RE = /^p_[0-9a-f]{16}$/;
 const SESSION_ID_RE = /^s_[0-9a-f]{16}$/;
 const SCORE_ID_RE = /^sc_[0-9a-f]{16}$/;
-const MODES = ['week', 'daily', 'custom'];
+const MODES = ['week', 'daily', 'custom', 'tutorial'];
 
 function cors(extra = {}) {
   return {

@@ -13,6 +13,7 @@
   const LATE_FINE_PER_MIN = 15;
   const FARE = 3;
   const STORE_KEY = 'late.week.v1';
+  const TUTORIAL_KEY = 'late.tutorial.done';
 
   const game = {
     screen: 'title',
@@ -96,6 +97,8 @@
   // ------------------------------------------------------------------ day setup
 
   function paramsForToday() {
+    game.adjust = null; // only the week has a Director
+    if (game.mode === 'tutorial') return L.difficulty.tutorialParams();
     if (game.mode === 'daily') return L.difficulty.paramsFor(2);
     if (game.mode === 'custom') return L.difficulty.paramsFor(game.custom.weekday);
     const adjust = L.difficulty.direct(game.week.history);
@@ -104,12 +107,14 @@
   }
 
   function daySeed() {
+    if (game.mode === 'tutorial') return L.difficulty.TUTORIAL_SEED;
     if (game.mode === 'daily') return L.rng.dailySeed();
     if (game.mode === 'custom') return game.custom.seed;
     return `${game.week.seed}-${game.week.weekday + 1}`;
   }
 
   function weekdayNow() {
+    if (game.mode === 'tutorial') return 0;
     if (game.mode === 'daily') return 2;
     if (game.mode === 'custom') return game.custom.weekday;
     return game.week.weekday;
@@ -125,7 +130,7 @@
     game.day = day;
     game.weekday = wd;
     game.params = params;
-    game.policy = L.display.policyFor(wd, game.mode === 'week' ? game.week.aids : []);
+    game.policy = game.mode === 'tutorial' ? { ...L.display.TUTORIAL } : L.display.policyFor(wd, game.mode === 'week' ? game.week.aids : []);
     game.signs = new Map();
     game.genMs = ms;
     const lk = L.day.lookups(day);
@@ -141,6 +146,10 @@
     const day = game.day;
     game.sim = L.sim.createSim(day);
     game.dm = L.analysis.deadlineMap(day); // latest time you can be anywhere and still clock in
+    // the route guide plans at a human pace; the display policy decides how much of it is shown
+    game.guide = game.policy.guide && game.policy.guide !== 'none' ? L.guide.createGuide(day, { dm: game.dm, reaction: L.difficulty.BASE.humanReaction }) : null;
+    game.nav = null;
+    game.coach = game.mode === 'tutorial' && L.coach ? L.coach.create(game) : null;
     game.glances = game.policy.phoneGlances;
     game.toasts = [];
     game.acc = 0;
@@ -155,10 +164,12 @@
     game.playStart = performance.now();
     L.screens.hideAll();
     snapCamera();
-    toast(`${game.weekdayLabel()} — leave home, clock in by 09:00`, '#2b6de0', 3);
+    if (game.mode === 'tutorial') toast('Day 0 — your first day. Follow the yellow arrows.', '#2b6de0', 3);
+    else toast(`${game.weekdayLabel()} — leave home, clock in by 09:00`, '#2b6de0', 3);
   }
 
   game.weekdayLabel = () => {
+    if (game.mode === 'tutorial') return `${L.difficulty.TUTORIAL.day} ${L.difficulty.TUTORIAL.zh}`;
     const w = L.difficulty.WEEK[game.day ? game.weekday : weekdayNow()];
     return `${w.day} ${w.zh}`;
   };
@@ -204,6 +215,7 @@
 
   function onEvents(evs) {
     const A = L.audio;
+    if (game.coach) game.coach.observe(evs);
     for (const e of evs) {
       switch (e.type) {
         case 'blocked':
@@ -292,6 +304,18 @@
     };
     game.lastResult = result;
     game.playSeconds = (performance.now() - (game.playStart || performance.now())) / 1000;
+    if (game.mode === 'tutorial') {
+      if (game.coach) game.coach.update(); // the last lesson ends with the day
+      result.learned = game.coach ? game.coach.learned : [];
+      result.missed = game.coach ? game.coach.missed : [];
+      result.earned = 0;
+      result.fine = 0;
+      game.setTutorialDone();
+      if (L.telemetry) L.telemetry.recordDay(game, result);
+      game.screen = 'result';
+      L.screens.tutorialResult(game, result);
+      return;
+    }
     if (game.mode === 'week') {
       game.week.history.push({ weekday: game.weekday, margin: r.margin, arrival: r.arrival, earned, seed: game.day.seed });
       game.week.wage += earned;
@@ -329,6 +353,24 @@
     game.mode = 'week';
     if (!game.week || game.week.weekday > 4) newWeek();
     goBriefing();
+  };
+  game.startTutorial = () => {
+    game.mode = 'tutorial';
+    goBriefing();
+  };
+  game.tutorialDone = () => {
+    try {
+      return root.localStorage.getItem(TUTORIAL_KEY) === '1';
+    } catch (e) {
+      return false;
+    }
+  };
+  game.setTutorialDone = () => {
+    try {
+      root.localStorage.setItem(TUTORIAL_KEY, '1');
+    } catch (e) {
+      /* private mode */
+    }
   };
   game.startDaily = () => {
     game.mode = 'daily';
@@ -449,8 +491,14 @@
         L.screens.help(game, true);
         return;
       }
-      if (k === 'map') openPhone();
-      if (k === 'timetable') openTimetable();
+      if (k === 'map') {
+        if (game.coach) game.coach.note('map');
+        openPhone();
+      }
+      if (k === 'timetable') {
+        if (game.coach) game.coach.note('timetable');
+        openTimetable();
+      }
       if (k === 'wait') game.ffHeld = true;
       if (['up', 'down', 'left', 'right', 'act'].includes(k)) L.audio.ensure();
     }
@@ -535,6 +583,8 @@
 
   game.resume = () => {
     game.paused = false;
+    // keys pressed while an overlay was open (the T or Esc that closed it) must not act again
+    L.input.drain();
     L.screens.hideAll();
   };
 
@@ -585,6 +635,11 @@
       H: game.H,
       officeIdx: day.network.stations.findIndex((x) => x.id === day.office.station),
     };
+    if (!alt && game.guide && game.screen === 'play') {
+      game.nav = game.guide.update(s);
+      v.guide = policy.guide === 'path' ? game.nav : null;
+      v.guideTarget = game.nav && !game.nav.busy ? game.nav.target : null;
+    }
     if (s.mode === 'train') {
       L.viewTrain.render(ctx, v);
     } else {
@@ -607,6 +662,10 @@
       v.speed = game.speed || 1;
       v.budget = policy.budgetMeter && game.dm && !alt ? L.analysis.budget(day, game.dm, s) : null;
       L.hud.render(ctx, v);
+      if (!alt && game.coach && game.screen === 'play') {
+        game.coach.update();
+        game.coach.render(ctx, v, game.frameDt);
+      }
       if (v.phoneOpen) drawPhone(ctx, v);
     }
   }

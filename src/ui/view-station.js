@@ -543,9 +543,18 @@
       ctx.fillRect(px - w / 2 + 6, row.y, 2, sy - row.y);
       ctx.fillRect(px + w / 2 - 8, row.y, 2, sy - row.y);
       G.roundRect(ctx, sx, sy, w, 22, 3, state === 'stale' ? '#2a2620' : '#161b22', '#3d4450');
+      const tgt = state === 'ok' ? v.guideTarget : null;
       items.forEach((it, i) => {
         const cx = sx + 8 + i * 44;
         const arrow = state === 'stale' ? L.wayfinding.FLIP[it.arrow] : it.arrow;
+        if (tgt && ((it.kind === 'line' && tgt.line === it.line) || (it.kind === 'exit' && tgt.exit === it.letter))) {
+          // the route guide lights up the sign for your next line or exit
+          ctx.save();
+          ctx.shadowColor = 'rgba(255,209,102,0.95)';
+          ctx.shadowBlur = 10 + 6 * Math.sin(v.clock * 5);
+          G.roundRect(ctx, cx - 4, sy - 3, 44, 28, 5, 'rgba(255,209,102,0.28)', '#ffd166', 2);
+          ctx.restore();
+        }
         if (it.kind === 'line') G.badge(ctx, v.lines.get(it.line), cx + 9, sy + 11, 8);
         else {
           G.roundRect(ctx, cx, sy + 3, 20, 16, 2, '#1d7a44');
@@ -555,6 +564,85 @@
       });
       if (state === 'stale') G.text(ctx, '旧', sx + w - 6, sy + 8, { size: 8, weight: 800, align: 'right', color: '#c8a15a', family: 'cjk' });
     }
+  }
+
+  // ------------------------------------------------------------------ route guide
+
+  const GUIDE = '#ffd166';
+
+  function chevron(ctx, x, y, dir, alpha) {
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.moveTo(x - dir * 6, y - 7);
+    ctx.lineTo(x + dir * 2, y);
+    ctx.lineTo(x - dir * 6, y + 7);
+    ctx.stroke();
+  }
+
+  function bounceArrow(ctx, x, y, dir, clock) {
+    const b = Math.sin(clock * 6) * 4;
+    ctx.globalAlpha = 1;
+    G.arrowGlyph(ctx, dir, x, y + (dir === 'down' ? b : -b), 26, GUIDE);
+  }
+
+  /** Monday's route guide: where to walk, which stairs to take, which train to board. */
+  function drawGuide(ctx, v, lay) {
+    const g = v.guide;
+    const s = v.sim;
+    if (!g || g.busy || !s || s.mode !== 'walk' || g.st !== v.stIndex) return;
+    const seg = v.I.segs[s.seg];
+    const fy = (seg.kind === 'street' ? lay.rows[0].y + 140 : feetY(lay, seg, s.lane)) - 6;
+    const px = X(lay, s.x);
+    ctx.save();
+    ctx.strokeStyle = GUIDE;
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.shadowColor = 'rgba(255,209,102,0.9)';
+    ctx.shadowBlur = 8;
+    if (g.x !== undefined && (g.kind === 'walk' || g.kind === 'office' || (g.kind === 'link' && g.dir))) {
+      const tx = X(lay, g.x);
+      const dir = Math.sign(tx - px);
+      if (dir && Math.abs(tx - px) > 10) {
+        const step = 24;
+        const phase = (v.clock * 42) % step;
+        for (let x = px + dir * (20 + phase); dir > 0 ? x < tx - 4 : x > tx + 4; x += dir * step) {
+          chevron(ctx, x, fy, dir, Math.min(0.95, Math.abs(x - px) / 60));
+        }
+      }
+      // where the next step starts
+      const r = 12 + 3 * Math.sin(v.clock * 5);
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.ellipse(tx, fy + 6, r * 1.6, r * 0.45, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      if (Math.abs(tx - px) > 30) bounceArrow(ctx, tx, fy - 78, 'down', v.clock);
+    }
+    if (g.kind === 'link' && !g.dir) {
+      const Lk = v.I.links[g.link];
+      const e = linkEnds(v, lay, Lk);
+      const [x0, y0, x1, y1] = g.way === 'ab' ? [e.ax, e.ay, e.bx, e.by] : [e.bx, e.by, e.ax, e.ay];
+      ctx.globalAlpha = 0.55 + 0.3 * Math.sin(v.clock * 5);
+      ctx.lineWidth = 6;
+      ctx.setLineDash([2, 12]);
+      ctx.lineDashOffset = -v.clock * 30;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0 - 34);
+      ctx.lineTo(x1, y1 - 34);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      bounceArrow(ctx, x0, y0 - 100, g.way === 'ab' ? 'down' : 'up', v.clock);
+    }
+    if (g.kind === 'lane') {
+      bounceArrow(ctx, px + 26 * (s.facing || 1), fy - 40, g.lane === 1 ? 'up' : 'down', v.clock);
+    }
+    if (g.kind === 'board') {
+      // Up boards the train behind the platform, Down the one in front
+      bounceArrow(ctx, px, g.side === 'far' ? fy - 108 : fy + 24, g.side === 'far' ? 'up' : 'down', v.clock);
+      const line = v.lines.get(g.line);
+      if (line) G.badge(ctx, line, px + 24, g.side === 'far' ? fy - 108 : fy + 24, 9);
+    }
+    ctx.restore();
   }
 
   function drawBoards(ctx, v, lay) {
@@ -868,6 +956,7 @@
     drawStreetDoors(ctx, v, lay);
     drawSigns(ctx, v, lay);
     for (const Lk of v.I.links) if (Lk.axis === 'h') drawHLink(ctx, v, lay, Lk);
+    drawGuide(ctx, v, lay);
     for (const seg of v.I.segs) drawCrowd(ctx, v, lay, seg, 1);
     for (const p of v.I.platforms) drawWaiting(ctx, v, lay, p, 'far');
     let playerPx = null;

@@ -1,6 +1,6 @@
 {
   "name": "late-telemetry-worker",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Cloudflare Worker + D1 for Late: anonymous opt-in playtest telemetry and the server-replayed daily-commute leaderboard.",

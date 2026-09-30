@@ -18,4 +18,5 @@ module.exports = {
   wayfinding: require('./wayfinding.js'),
   excuses: require('./excuses.js'),
   analysis: require('./analysis.js'),
+  guide: require('./guide.js'),
 };

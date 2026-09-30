@@ -18,7 +18,7 @@
     LEADERBOARD_ENDPOINT: null, // e.g. 'https://late-telemetry.<account>.workers.dev/v1/scores'
   });
 
-  const APP_VERSION = '0.3.1';
+  const APP_VERSION = '0.4.0';
   const KEY = 'late.telemetry.v1';
   const SETTINGS_KEY = 'late.settings.v1';
   const MAX_SESSIONS = 300;
@@ -80,7 +80,7 @@
   }
 
   function isValidSession(s) {
-    return !!s && s.schema === SCHEMA && typeof s.id === 'string' && typeof s.seed === 'string' && ['week', 'daily', 'custom'].includes(s.mode) && typeof s.startedAt === 'string';
+    return !!s && s.schema === SCHEMA && typeof s.id === 'string' && typeof s.seed === 'string' && ['week', 'daily', 'custom', 'tutorial'].includes(s.mode) && typeof s.startedAt === 'string';
   }
 
   function send(url, body) {

@@ -7,6 +7,8 @@
 //   node tools/playtest.mjs                 play Monday of a fresh week
 //   node tools/playtest.mjs --week          play Monday to Friday, shop in between
 //   node tools/playtest.mjs --late          dawdle until 09:00 first, expect a LATE result
+//   node tools/playtest.mjs --tutorial      a new player: Day 0 with the coach, then Monday,
+//                                           both played only by following the on-screen guide
 //   node tools/playtest.mjs --shots DIR     save screenshots of every phase to DIR
 //
 // Needs Playwright (npm i -D playwright, or a global install on NODE_PATH).
@@ -49,9 +51,12 @@ async function waitScreen(name, timeout = 240000) {
   await page.waitForFunction((n) => window.__late && window.__late.screen === n, name, { timeout, polling: 200 });
 }
 
-/** Install the keyboard-driving autopilot. `dawdleUntil`: stand still (holding Space) until that game time. */
-async function drive(dawdleUntil) {
-  await page.evaluate((until) => {
+/**
+ * Install the keyboard driver. `dawdleUntil`: stand still (holding Space) until that game time.
+ * `driver`: 'autopilot' (the perfect commuter) or 'guide' (does only what the on-screen route guide says).
+ */
+async function drive(dawdleUntil, driver = 'autopilot') {
+  await page.evaluate(([until, who]) => {
     const game = window.__late;
     const L = window.Late;
     const K = L.sim.KEY;
@@ -74,9 +79,14 @@ async function drive(dawdleUntil) {
         spaceDown = false;
       }
       if (!game.__ap || game.__apSim !== game.sim) {
-        game.__ap = L.autopilot.createAutopilot(game.day, game.sim);
+        if (who === 'guide') {
+          if (!game.guide) throw new Error('no route guide on this day');
+          game.__ap = { input: L.guide.follow(game.day, game.sim, game.guide, { decide: 8 }) };
+        } else {
+          game.__ap = L.autopilot.createAutopilot(game.day, game.sim);
+          game.__ap.replan();
+        }
         game.__apSim = game.sim;
-        game.__ap.replan();
       }
       const want = game.__ap.input();
       for (const [bit, code] of codes) {
@@ -85,10 +95,10 @@ async function drive(dawdleUntil) {
       }
       held = want;
     };
-  }, dawdleUntil || 0);
+  }, [dawdleUntil || 0, driver]);
 }
 
-async function playDay(label, { dawdle = false } = {}) {
+async function playDay(label, { dawdle = false, driver = 'autopilot' } = {}) {
   await waitScreen('briefing');
   await page.waitForTimeout(600);
   await shot(`${label}-briefing`);
@@ -112,7 +122,7 @@ async function playDay(label, { dawdle = false } = {}) {
   await page.keyboard.up('ArrowRight');
   const x1 = await page.evaluate(() => window.__late.sim.state.x);
   if (x1 === x0) throw new Error('keyboard input did not move the player');
-  await drive(dawdle ? 9 * 3600 + 60 : 0);
+  await drive(dawdle ? 9 * 3600 + 60 : 0, driver);
   // screenshots along the way: in a station and on a train
   let sawTrain = false;
   let sawStation = false;
@@ -171,6 +181,63 @@ try {
     console.log(`leaderboard block: ${lb.trim()}`);
     if (!/not deployed/i.test(lb)) throw new Error('expected the leaderboard to say it is not deployed');
     results.push(r);
+  } else if (flag('--tutorial')) {
+    // a new player: the title puts the tutorial first
+    const first = await page.evaluate(() => {
+      const b = document.querySelector('[data-testid="tutorial"]');
+      return !!b && b.classList.contains('primary');
+    });
+    if (!first) throw new Error('expected the tutorial to be the first choice for a new player');
+    await page.click('[data-testid="tutorial"]');
+    await waitScreen('briefing');
+    await page.waitForTimeout(600);
+    await shot('tutorial-briefing');
+    await page.click('[data-testid="leave-home"]');
+    await waitScreen('play');
+    await drive(0, 'guide');
+    const shown = [];
+    let usedMap = false;
+    let usedTimetable = false;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 300000) {
+      const st = await page.evaluate(() => ({ screen: window.__late.screen, lesson: window.__late.coach && window.__late.coach.current }));
+      if (st.screen !== 'play') break;
+      if (st.lesson && !shown.includes(st.lesson)) {
+        shown.push(st.lesson);
+        await shot(`tutorial-${st.lesson}`);
+      }
+      // do what the coach asks
+      if (st.lesson === 'map' && !usedMap) {
+        usedMap = true;
+        await page.keyboard.press('KeyM');
+        await page.waitForTimeout(300);
+        await page.keyboard.press('KeyM');
+      }
+      if (st.lesson === 'timetable' && !usedTimetable) {
+        usedTimetable = true;
+        await page.keyboard.press('KeyT');
+        await page.waitForTimeout(300);
+        await shot('tutorial-timetable-open');
+        await page.keyboard.press('KeyT');
+      }
+      await page.waitForTimeout(100);
+    }
+    await waitScreen('result', 10000);
+    await page.waitForTimeout(500);
+    await shot('tutorial-result');
+    const tr = await page.evaluate(() => ({ r: window.__late.lastResult, all: window.Late.coach.LESSONS.length, done: window.__late.tutorialDone() }));
+    console.log(`tutorial: ${tr.r.how} ${Math.round(tr.r.margin)} s early · lessons shown ${shown.join(' → ')} · learned ${tr.r.learned.length}/${tr.all}`);
+    if (tr.r.how !== 'office' || tr.r.late) throw new Error('expected to finish the tutorial on time');
+    if (tr.r.learned.length !== tr.all) throw new Error(`lessons not learned: ${tr.r.missed.join(', ')}`);
+    if (!tr.done) throw new Error('the tutorial should be remembered as done');
+    results.push(tr.r);
+    // straight on into the week: Monday, played by following the guide only
+    await page.click('[data-testid="tutorial-start-week"]');
+    const mon = await playDay('mon', { driver: 'guide' });
+    if (mon.how !== 'office' || mon.late) throw new Error('expected Monday on time by following the guide');
+    const guide = await page.evaluate(() => window.__late.policy.guide);
+    if (guide !== 'path') throw new Error(`Monday should show the route guide, got ${guide}`);
+    results.push(mon);
   } else if (flag('--late')) {
     await page.evaluate((seed) => window.__late.startCustom(seed, 1), seedArg);
     const r = await playDay('late', { dawdle: true });

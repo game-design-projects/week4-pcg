@@ -255,6 +255,17 @@ kbd {
 .tt-hw { white-space: nowrap; }
 .notes { margin: 8px 0 12px; padding-left: 18px; color: #c9d1dc; font-size: 14px; line-height: 1.6; }
 
+/* Day 0: the tutorial */
+.hint.tutorial-intro {
+  background: rgba(255, 209, 102, 0.1);
+  border-color: rgba(255, 209, 102, 0.5);
+  line-height: 1.6;
+  font-size: 14px;
+}
+.hint.tutorial-intro .dim { display: block; margin-top: 4px; }
+.tutorial-result .learned { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; color: #8fe0b0; }
+.tutorial-result .menu { margin-top: 12px; }
+
 /* ------------------------------------------------------------ result */
 
 .result { width: min(1100px, 100%); position: relative; }

@@ -134,6 +134,21 @@
     G.text(ctx, title, nx + 20 + badgesW + (nameW - 40 - badgesW) / 2, 41, { size: 20, weight: 800, align: 'center', family: 'cjk' });
     G.text(ctx, where, W / 2, 62, { size: 12, weight: 600, align: 'center', color: '#b9c2cf' });
 
+    // ---- route guide (Monday, the tutorial): the next step from here
+    if (v.guide && v.guide.text) {
+      const g = v.guide;
+      const tw = G.measure(ctx, g.text, 14, 700, 'cjk');
+      const gw = tw + 84;
+      const gx = W / 2 - gw / 2;
+      ctx.save();
+      ctx.globalAlpha = g.busy ? 0.6 : 1;
+      G.roundRect(ctx, gx, 80, gw, 26, 13, 'rgba(11,13,17,0.9)', '#ffd166', 1.5);
+      G.roundRect(ctx, gx + 4, 84, 54, 18, 9, '#ffd166');
+      G.text(ctx, '导航 NAV', gx + 31, 97, { size: 10, weight: 800, align: 'center', color: '#1b1f25', family: 'cjk' });
+      G.text(ctx, g.text, gx + 68, 98, { size: 14, weight: 700, color: '#ffe7a8', family: 'cjk' });
+      ctx.restore();
+    }
+
     // ---- day, wage, phone
     const rx = W - 14;
     G.roundRect(ctx, rx - 236, 12, 236, 62, 10, 'rgba(11,13,17,0.86)', 'rgba(255,255,255,0.1)');
@@ -147,15 +162,17 @@
     if (v.policy.timetable === 'always') G.text(ctx, 'T times', rx - 110, 66, { size: 9, weight: 700, color: '#8b95a3' });
 
     // ---- time in hand (easy days only): how late you could be here and still make 09:00
-    let ffY = 108;
+    // on a train the line strip runs under the clock, so the meter goes below it
+    const by = v.sim.mode === 'train' ? 170 : 106;
+    let ffY = by + 2;
     if (v.budget !== null && v.budget !== undefined) {
       const b = v.budget;
       const ok = b >= 0;
       const col = !ok ? '#e5484d' : b < 60 ? '#f5a524' : '#30a46c';
-      G.roundRect(ctx, 14, 106, 250, 30, 8, 'rgba(11,13,17,0.86)', col, 2);
+      G.roundRect(ctx, 14, by, 250, 30, 8, 'rgba(11,13,17,0.86)', col, 2);
       const txt = !Number.isFinite(b) ? 'No route makes 09:00 from here' : ok ? `In hand ${Math.floor(b / 60)}:${String(Math.floor(b % 60)).padStart(2, '0')} · at perfect play` : `Lost by ${L.rules.fmtDuration(-b)} — keep going`;
-      G.text(ctx, txt, 26, 126, { size: 13, weight: 800, color: col });
-      ffY = 142;
+      G.text(ctx, txt, 26, by + 20, { size: 13, weight: 800, color: col });
+      ffY = by + 36;
     }
     // ---- fast forward
     if (v.speed > 1.5) {

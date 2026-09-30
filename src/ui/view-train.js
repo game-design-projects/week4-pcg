@@ -131,6 +131,8 @@
     const atStop = !moving;
     const open = atStop ? Math.max(0, Math.min(1, (v.t - TT.arrAt(sv, s.ride.trip, pos.stop)) / 1.5, (TT.depAt(sv, s.ride.trip, pos.stop) - v.t - 1) / 1.5)) : 0;
     const near = RULES.DOORS.findIndex((d) => Math.abs(d - me) <= RULES.DOOR_REACH);
+    const guideOn = v.guide && (v.guide.kind === 'ride' || v.guide.kind === 'alight');
+    const guideDoor = guideOn ? v.guide.door : -1;
     RULES.DOORS.forEach((d, k) => {
       const dcx = sx(d);
       if (dcx < -120 || dcx > W + 120) return;
@@ -148,8 +150,19 @@
         ctx.fillRect(dcx - hw * 0.7, WIN_TOP - 10, hw * 1.4, floorY - WIN_TOP - 20);
       }
       const here = k === near;
-      G.roundRect(ctx, dcx - 34, WIN_TOP - 44, 68, 20, 4, here && atStop ? '#1f7a44' : '#20262f');
-      G.text(ctx, `${k + 1}号车 Car ${k + 1}`, dcx, WIN_TOP - 30, { size: 11, weight: 700, align: 'center', color: '#e8edf3', family: 'cjk' });
+      const goal = guideDoor === k;
+      if (goal) {
+        // the route guide: the door nearest your way out at the next change
+        ctx.save();
+        ctx.strokeStyle = '#ffd166';
+        ctx.lineWidth = 4;
+        ctx.shadowColor = 'rgba(255,209,102,0.9)';
+        ctx.shadowBlur = 10 + 6 * Math.sin(v.clock * 5);
+        ctx.strokeRect(dcx - hw, WIN_TOP - 20, hw * 2, floorY - (WIN_TOP - 20));
+        ctx.restore();
+      }
+      G.roundRect(ctx, dcx - 34, WIN_TOP - 44, 68, 20, 4, goal ? '#ffd166' : here && atStop ? '#1f7a44' : '#20262f');
+      G.text(ctx, `${k + 1}号车 Car ${k + 1}`, dcx, WIN_TOP - 30, { size: 11, weight: 700, align: 'center', color: goal ? '#1b1f25' : '#e8edf3', family: 'cjk' });
     });
     // passengers along the whole train (deterministic per trip)
     const trip = s.ride.trip;
@@ -198,12 +211,12 @@
     if (tw > 470) G.text(ctx, msg, dcx - 236 - scrollX + tw + 120, tickerY + 27, { size: 18, weight: 700, color: '#ffb547', family: 'cjk' });
     ctx.restore();
 
-    drawStrip(ctx, v, sv, line, pos, W);
-    drawTrainDiagram(ctx, me, near, W);
+    drawStrip(ctx, v, sv, line, pos, W, guideOn ? v.guide.stopIndex : -1);
+    drawTrainDiagram(ctx, me, near, W, guideDoor);
     return { pos, open, moving };
   }
 
-  function drawStrip(ctx, v, sv, line, pos, W) {
+  function drawStrip(ctx, v, sv, line, pos, W, goalStop) {
     const n = sv.stops.length;
     const x0 = 70;
     const x1 = W - 70;
@@ -226,7 +239,18 @@
       ctx.stroke();
       const align = k === 0 ? 'left' : k === n - 1 ? 'right' : 'center';
       const lx = k === 0 ? x - 8 : k === n - 1 ? x + 8 : x;
-      G.text(ctx, st.name.en, lx, y + 22, { size: 10, weight: 600, align, color: past ? '#6b7280' : '#e6ebf2' });
+      if (k === goalStop) {
+        ctx.save();
+        ctx.strokeStyle = '#ffd166';
+        ctx.lineWidth = 3;
+        ctx.shadowColor = 'rgba(255,209,102,0.9)';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(x, y, 11 + 2 * Math.sin(v.clock * 5), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      G.text(ctx, st.name.en, lx, y + 22, { size: 10, weight: k === goalStop ? 800 : 600, align, color: k === goalStop ? '#ffd166' : past ? '#6b7280' : '#e6ebf2' });
       if (v.policy.stripTransfers) {
         const others = st.lines.filter((l) => l !== line.id);
         others.forEach((id, i) => G.badge(ctx, v.lines.get(id), x - (others.length - 1) * 8 + i * 16, y - 15, 6));
@@ -238,14 +262,14 @@
   }
 
   /** Five cars, their doors, and where you are standing. */
-  function drawTrainDiagram(ctx, me, near, W) {
+  function drawTrainDiagram(ctx, me, near, W, goal = -1) {
     const w = 250;
     const x0 = W - w - 24;
     const y = 222;
     G.roundRect(ctx, x0 - 10, y - 14, w + 20, 34, 8, 'rgba(12,14,18,0.85)');
     const cw = w / RULES.DOORS.length;
     for (let c = 0; c < RULES.DOORS.length; c++) {
-      G.roundRect(ctx, x0 + c * cw + 1, y - 6, cw - 2, 16, 3, '#dfe3e8');
+      G.roundRect(ctx, x0 + c * cw + 1, y - 6, cw - 2, 16, 3, '#dfe3e8', c === goal ? '#ffd166' : null, 3);
       ctx.fillStyle = c === near ? '#39d98a' : '#6b7280';
       ctx.fillRect(x0 + c * cw + cw / 2 - 3, y - 6, 6, 16);
     }

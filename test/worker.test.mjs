@@ -87,6 +87,7 @@ test('the collector never reads IP, User-Agent or geo', () => {
 
 test('sessions: structural validation', () => {
   assert.ok(isValidIncoming(session()));
+  assert.ok(isValidIncoming(session({ mode: 'tutorial' })));
   assert.equal(isValidIncoming(session({ playerId: 'p_nothex' })), false);
   assert.equal(isValidIncoming(session({ mode: 'hack' })), false);
   assert.equal(isValidIncoming({ ...session(), schema: 2 }), false);

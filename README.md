@@ -32,20 +32,21 @@ What stands between you and the office:
 - **Doors.** You get off at the door you are standing by, so walk through the carriages (slowly, it is crowded) to the one nearest the exit you need.
 - **Hubs.** From Wednesday the route goes through a hub where three or more lines meet. Hubs are built from several blocks: long passages, a maze of one-way passages, two halves joined through the street, or platforms many levels down.
 
-A run is a five-day work week. Each day the generator adds checkpoints and closures and leaves you less time to lose, and the game shows you less: the map is on screen for 25 s on Thursday and 12 s on Friday, the phone map is rationed to a few glances and then none, platform boards break, and signs go missing or out of date. You earn ¥400 a day (¥15 docked per late minute, plus any fares) and can spend it between days on aids that bring some of the information back. A late day ends with a message to your boss, written from what actually went wrong, and the exact moment the day was lost.
+A run is a five-day work week, after an optional **Day 0**: a guided first day on a small, forgiving city where a coach explains each thing the first time you meet it. On Monday a **route guide** shows the way (arrows on the floor, the stairs to take, the train to board, the door to get off at); on Tuesday only the signs for your next line light up; after that you are on your own. Each day the generator adds checkpoints and closures and leaves you less time to lose, and the game shows you less: the map is on screen for 25 s on Thursday and 12 s on Friday, the phone map is rationed to a few glances and then none, platform boards break, and signs go missing or out of date. You earn ¥400 a day (¥15 docked per late minute, plus any fares) and can spend it between days on aids that bring some of the information back. A late day ends with a message to your boss, written from what actually went wrong, and the exact moment the day was lost.
 
 | | |
 |---|---|
-| ![Title screen: a work week, the daily commute, or any seed](docs/screenshots/title.jpg) | ![Thursday's briefing: the map is visible for 25 seconds, the timetable only here](docs/screenshots/briefing.jpg) |
+| ![Title screen: Day 0 first for a new player, then the week, the daily commute, or any seed](docs/screenshots/title.jpg) | ![Thursday's briefing: the map is visible for 25 seconds, the timetable only here](docs/screenshots/briefing.jpg) |
 | ![On the train: the line strip, where you are in the train, and the door you will get off at](docs/screenshots/train.jpg) | ![A late result: your route against the best one, your time in hand over the commute, and the moment it ran out](docs/screenshots/result-late.jpg) |
+| ![Monday's route guide: arrows to the entrance, the signs for your line lit up, and the next step under the station name](docs/screenshots/guide.jpg) | ![Day 0: the coach explains boarding the first time you reach a platform](docs/screenshots/tutorial.jpg) |
 
 ## How to run
 
 - **Play:** open `index.html` in a browser. Double-clicking it works: the scripts are plain `<script>` files, with no build step, no dependencies and no network needed (the pixel font comes from Google Fonts when you are online; otherwise the page falls back to a system font).
   - Controls: ← → walk · ↑ board the train behind the platform, go up, move to the far lane · ↓ board the train in front, go down, move to the near lane · ↑ or E get off at a stop · hold Space to let time pass · M phone map · T timetable · Esc pause. Touch screens get on-screen buttons.
-  - Modes on the title screen: **a work week** (Monday to Friday, with the Director adjusting each day), **the daily commute** (the same city for everyone that day) and **play a seed** (any seed and weekday; also works as a link, e.g. `index.html?seed=K7Q2-M4XP&wd=3`, where `wd` is 0 for Monday to 4 for Friday).
-- **Tests:** `node --test` (Node 20 or newer). 43 tests: seed determinism, the winnable check, the corridor rules, the generator's output, and the leaderboard Worker. The Worker tests need `node:sqlite` (Node 22.13 or newer) and are skipped on older versions.
-- **Headless playthrough:** `node tools/playtest.mjs` opens `index.html` from disk in Chromium and plays Monday through the game's real keyboard handler, with the autopilot choosing the keys. `--week` plays Monday to Friday with the shop in between, `--late` dawdles past 09:00 and expects a LATE result, `--daily` plays the daily commute, and `--shots DIR` saves a screenshot of every phase. Needs Playwright.
+  - Modes on the title screen: **Day 0** (the tutorial, offered first to a new player), **a work week** (Monday to Friday, with the Director adjusting each day), **the daily commute** (the same city for everyone that day) and **play a seed** (any seed and weekday; also works as a link, e.g. `index.html?seed=K7Q2-M4XP&wd=3`, where `wd` is 0 for Monday to 4 for Friday).
+- **Tests:** `node --test` (Node 20 or newer). 49 tests: seed determinism, the winnable check, the corridor rules, the generator's output, the route guide and Day 0, and the leaderboard Worker. The Worker tests need `node:sqlite` (Node 22.13 or newer) and are skipped on older versions.
+- **Headless playthrough:** `node tools/playtest.mjs` opens `index.html` from disk in Chromium and plays Monday through the game's real keyboard handler, with the autopilot choosing the keys. `--week` plays Monday to Friday with the shop in between, `--late` dawdles past 09:00 and expects a LATE result, `--daily` plays the daily commute, `--tutorial` plays Day 0 as a new player (doing what the coach asks) and then Monday, both by following only the on-screen guide, and `--shots DIR` saves a screenshot of every phase. Needs Playwright.
 - **Sweep:** `node tools/sweep.js --n 40` generates 40 days per weekday, solves and plays each one, and prints the report the improvement loop is built on (`--out FILE.md` saves it).
 - **Sprites:** `python3 tools/extract_sprites.py` rebuilds `assets/sprites.png` and `src/ui/atlas.js` from the team's sheet in `resources/sprite.png` (needs Pillow).
 
@@ -77,11 +78,14 @@ flowchart LR
 
 The simulation (`sim.js`) plays the same rules in fixed steps of a quarter of a game second, with no clocks and no `Math.random` (queue times come from a hash of the seed, the checkpoint and the visit). The autopilot (`autopilot.js`) presses the keys a perfect or a hesitant commuter would. The tests use it to prove that what the generator promises can actually be walked.
 
+The **route guide** (`guide.js`) reuses the same solver while you play: from wherever you stand it plans the rest of the way at a human pace and says the next step. It plans again whenever you change floor, lane or train, in under a millisecond, so going the wrong way never strands it. **Day 0** is the same generator on its own setting (`difficulty.tutorialParams`: three lines, one change, no checkpoints or closures, 15 minutes to spare) with one fixed seed, `DAY-ZERO`. We picked it from eight candidates as the one whose route passes stairs, an escalator, fare gates, two-lane passages and a change of line.
+
 ## How PCG adds to our game
 
 - **A commute you cannot memorise.** Every day is a new city and timetable, so you read the signs, the boards and the map instead of remembering a route. Then the week takes the reading away.
 - **Difficulty as numbers.** A weekday is a row of parameters, not a hand-built level: lines, transfers, checkpoints, closures, irregular timetables, hub flavours and slack. The Director reads how your last two days went and nudges the next day's slack, queue lengths and closures. It never builds anything itself.
 - **Fair by construction, and checked.** Every day is solved before you see it, with the worst queues and at human pace, and the sweep plays hundreds of days to check that this holds (see [The improvement loop](#the-improvement-loop)). Being late should be your fault, not the generator's.
+- **Help that works on any city.** A hand-made tutorial level would teach one layout; the route guide works out the next step on whatever city was generated today, which is what lets Monday hold your hand and the rest of the week let go.
 - **A day that can explain itself.** Because the deadline map covers every place and moment, the game knows how much time you have in hand anywhere: a live meter on Monday and Tuesday, and at the end of every day a graph of your time in hand and the moment it ran out ("The day was lost at 08:21:50 on Wanquan Avenue"). The message to the boss is picked from what happened in your run.
 - **Shared days.** A day is its seed, so the daily commute is the same city for everyone, a seed can be sent as a link, and the leaderboard can check a run by replaying it.
 
@@ -111,8 +115,9 @@ There are two separate knobs. The **generator parameters** (`src/core/difficulty
 | escalator reversal timers | yes | yes | | | |
 | station minimap · time-in-hand meter | yes · yes | yes · yes | yes · no | no · no | no · no |
 | transfer lines on the train's strip | yes | yes | yes | yes | |
+| route guide | whole path | lit signs | | | |
 
-Aids from the shop loosen the display policy for a day (more phone glances, working boards, unlimited time over the map, fixed signs). They never change the generated day.
+Aids from the shop loosen the display policy for a day (more phone glances, working boards and lit signs, unlimited time over the map, fixed signs). They never change the generated day. Day 0 shows everything Monday does, plus the coach.
 
 ## The improvement loop
 
@@ -128,6 +133,8 @@ After the first playable version (0.1) we measured before adding anything. `tool
 | checkpoints a typical commuter meets (Tue / Fri) | not measured | 0.80 / 1.68 | 0.85 / 1.95 |
 | attempts per Friday day | 1.8 | 2.5 | 1.5 |
 | Friday generation time (median) | 24 ms | 111 ms | 100 ms |
+
+**Then playtesting (0.4).** People who tried it said there was nothing to teach the controls and that the first day was too hard: new players got lost on Monday. So 0.4 adds Day 0 and the route guide, which fades from the whole path on Monday to lit signs on Tuesday to nothing. A hesitant player (10 s at every stair or gate) who does only what the guide says is on time on all 40 Monday and all 40 Tuesday sweep days. Building it also turned up a bug that made the timetable impossible to close with T.
 
 The sweep also exposed two rules bugs (the solver could plan a lane change where ↑ means "climb", and could put you in the far lane where the simulation puts you in the near one) and an exploit: the best route hopped off at a stop, walked along the platform and got back on the same train to change cars. The fix was a new rule rather than a patch: you can walk through the carriages. The two Friday days with a 6-second pinch point on the fastest route are a known, accepted case; a safer route remains, and the hesitant commuter is never late on them.
 
@@ -149,6 +156,7 @@ To deploy: `cd server && npm install`, `npx wrangler d1 create late-telemetry` a
 - **Can the Worker afford to check a run?** Replaying it, yes (under 5 ms, about 50 input changes per day). Regenerating the day costs more, so the Worker keeps it in memory.
 - **What does it take to reproduce a day?** The seed, the weekday, the Director's adjustment and the generator version.
 - **Can a hub be annoying but fair?** Building hubs from blocks gave us the annoying part (a hub transfer takes a median of about five game minutes); timing the day from the deadline map at human pace gave us the fair part.
+- **Was the first day fair to a new player?** By the numbers, yes; in playtesting, no. The solver said Monday could be won, but a new player did not know the controls and got lost in the first station. Solving a day is not the same as a person being able to read it, so 0.4 adds a tutorial and has the solver guide the player on Monday.
 - **Still open:** whether the difficulty we compute matches the difficulty players feel. That is what the telemetry is for once it is deployed. We did not use Jev.
 
 ## Project layout
@@ -167,7 +175,8 @@ src/core/                the generator and everything that must agree with it (n
   sim.js, autopilot.js     the playable rules in fixed steps, and a player for them
   display.js, wayfinding.js  what the player is shown each weekday, and the signs
   analysis.js, excuses.js  time in hand, the moment a day was lost, the message to the boss
-src/ui/                  canvas views, HUD, screens, input, audio, telemetry and leaderboard clients
+  guide.js                 the route guide: the next step from wherever you stand
+src/ui/                  canvas views, HUD, screens, input, audio, the Day 0 coach, telemetry and leaderboard clients
 assets/sprites.png       sprites cut from the team's sheet (resources/sprite.png)
 server/                  Cloudflare Worker + D1: telemetry collector and leaderboard
 test/                    node --test suites

@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,           -- 's_' + 16 hex, made by the client
   player_id TEXT NOT NULL,       -- 'p_' + 16 hex, random, made in the browser
-  mode TEXT NOT NULL,            -- week | daily | custom
+  mode TEXT NOT NULL,            -- week | daily | custom | tutorial
   seed TEXT NOT NULL,            -- with weekday + adjust + gen_version this regenerates the day
   weekday INTEGER,
   gen_version TEXT,

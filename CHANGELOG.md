@@ -4,6 +4,50 @@ What changed in Late, and why. Versions after 0.1 come from the improvement loop
 generated days through the solver and the autopilot (`node tools/sweep.js`), look for days that
 are trivial, unfair or dull, change the generator or the rules, and measure again.
 
+## 0.4.0 — playtest feedback: a tutorial day and a route guide for Monday
+
+From playtesting (feedback on the pull request): **there was nothing to teach the controls**, and **the first day
+was too hard** — a new player got lost on Monday. The suggestion was to guide the player early and take the
+guidance away as the week goes on, which fits the "less information every day" idea.
+
+**Day 0, a tutorial.** Before the week there is now a guided first day, offered first on the title screen to a new
+player. It is a normal generated day on a small, forgiving setting: three lines, one change of line, no
+checkpoints or closures and 15 minutes to spare (`difficulty.tutorialParams`). The seed is fixed (`DAY-ZERO`) so
+everyone learns on the same day. It was picked from eight candidates as the one whose guided route passes stairs,
+an escalator, fare gates, two-lane passages and a change of line. A coach (`src/ui/coach.js`) shows nine short
+lessons, each the first time its situation comes up, and keeps each one on screen until you have done the thing
+once: walking, stairs and escalators, fare gates, two lanes, boarding, on the train, the phone map, the timetable,
+and your stop. The result screen lists what you learned and leads straight into Monday.
+
+**A route guide that fades over the week.** `src/core/guide.js` works out, from wherever you stand, the next
+thing to do to reach the office ("Walk ← to entrance B", "↓ Board Line 6 → Gangtiemen", "Ride to Wanquan Plaza
+(4 stops) · walk → to car 5"). It plans with the same solver that checks each day, at a human pace (time to read
+the signs, a margin to step onto a train) with average queues. It plans again whenever you change floor, lane or
+train, so walking the wrong way does not break it; a new plan takes under a millisecond. How much of the guide you
+see is a display setting, like everything else that fades through the week:
+- Monday (and Day 0): the whole path. Chevrons on the floor, the stairs to take, the train to board, the door
+  to get off at and the stop on the line strip, plus a NAV line under the station name.
+- Tuesday: only the signs for your next line or exit light up.
+- Wednesday on: nothing (the Transit app aid brings the lit signs back).
+
+**Measured.** A hesitant player (10 s at every stair or gate) who does *only* what the guide says is on time on
+40/40 Monday and 40/40 Tuesday days of the sweep (p10 margin 249 s and 323 s). The tests check this, check that
+the guide recovers after you walk the wrong way first, and check that Day 0 meets everything the coach teaches.
+`node tools/playtest.mjs --tutorial` plays Day 0 in the browser as a new player (9/9 lessons), then Monday, both
+by following the on-screen guide.
+
+**Found on the way.**
+- Closing the timetable with T reopened it at once, and closing it with Esc opened the pause menu. The key that
+  closed an overlay was still queued. Keys pressed while an overlay is open are now dropped when it closes.
+- The solver's plan from a spot between two graph nodes left out the first short walk to the nearest node.
+  This never mattered for the autopilot, which only re-plans on a node, but it broke the guide: in its first test
+  run only 20 of 120 guided days reached the office on time. The guide now adds that first walk back.
+- A daily or seed day played after a week day recorded the week's Director adjustment in its telemetry, which
+  would have regenerated the wrong day. Only week days carry one now.
+- On a train the time-in-hand meter covered the start of the line strip; it now sits below it.
+
+No generator change for the week: still `g3`, and every seed gives the same day as in 0.3.
+
 ## 0.3.1 — fixes found while playing for the screenshots
 
 No generator change (still `g3`: every seed gives the same day as in 0.3.0).

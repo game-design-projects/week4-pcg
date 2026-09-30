@@ -76,6 +76,8 @@
     const seedIn = h('input', { class: 'seed-in', placeholder: 'SEED e.g. K7Q2-M4XP', maxlength: 24, 'aria-label': 'Seed' });
     const daySel = h('select', { class: 'seed-day', 'aria-label': 'Weekday difficulty' }, ...L.difficulty.WEEK.map((d, i) => h('option', { value: i }, `${d.day} ${d.zh}`)));
     const custom = h('div', { class: 'custom', hidden: true }, seedIn, daySel, btn('Play ▸', () => game.startCustom(seedIn.value, Number(daySel.value)), 'small'));
+    const newHere = !game.tutorialDone() && !canContinue;
+    const tutorialBtn = btn(newHere ? 'Day 0: your first day (tutorial) — start here' : 'Replay the tutorial (Day 0)', () => game.startTutorial(), newHere ? 'primary' : '', { dataset: { testid: 'tutorial' } });
     show(
       h(
         'div',
@@ -85,7 +87,8 @@
         h(
           'div',
           { class: 'menu' },
-          btn(canContinue ? `Continue the week — ${wd.day} ${wd.zh}` : 'Start the week (Mon–Fri)', () => (canContinue ? game.continueWeek() : game.startWeek()), 'primary', { dataset: { testid: 'start-week' } }),
+          newHere ? tutorialBtn : null,
+          btn(canContinue ? `Continue the week — ${wd.day} ${wd.zh}` : 'Start the week (Mon–Fri)', () => (canContinue ? game.continueWeek() : game.startWeek()), newHere ? '' : 'primary', { dataset: { testid: 'start-week' } }),
           canContinue ? btn('Start a new week', () => game.startWeek(), '') : null,
           btn('Daily commute · same city for everyone', () => game.startDaily(), '', { dataset: { testid: 'daily' } }),
           btn('Play a seed…', () => {
@@ -93,6 +96,7 @@
             if (!custom.hidden) seedIn.focus();
           }),
           custom,
+          newHere ? null : tutorialBtn,
         ),
         h(
           'div',
@@ -202,10 +206,16 @@
         h(
           'div',
           { class: 'brief-side' },
-          h('p', { class: 'kicker' }, `${wk.day} ${wk.zh} · ${game.mode === 'daily' ? 'Daily commute' : game.mode === 'custom' ? 'Seed' : `Week ${game.week.seed}`} · day ${day.seed}`),
+          h('p', { class: 'kicker' }, game.mode === 'tutorial' ? `Day 0 入职 · Tutorial · day ${day.seed}` : `${wk.day} ${wk.zh} · ${game.mode === 'daily' ? 'Daily commute' : game.mode === 'custom' ? 'Seed' : `Week ${game.week.seed}`} · day ${day.seed}`),
           h('h2', {}, `Leave home ${fmtClock(day.startTime)}`),
           h('p', { class: 'lead' }, 'Clock in by ', h('b', {}, '09:00'), ' at Daka Tech, ', h('b', {}, `${office.name.zh} ${office.name.en}`), '. You live by ', h('b', {}, `${home.name.en}`), '.'),
           memo,
+          game.mode === 'tutorial'
+            ? h('div', { class: 'hint tutorial-intro' },
+              h('b', {}, 'Your first day at Daka Tech. '),
+              'Yellow arrows show the way and a coach explains each new thing the first time you meet it. You have a quarter of an hour to spare, so take your time. ',
+              h('span', { class: 'dim' }, 'Controls: ← → walk · ↑ ↓ stairs, trains and lanes · E get off · Space wait · M map · T timetable.'))
+            : null,
           hint,
           ttCard,
           h('ul', { class: 'notes' }, ...notes.map((n) => h('li', {}, n))),
@@ -257,6 +267,7 @@
           h('li', {}, h('b', {}, 'Gates: '), 'leaving the paid area and coming back costs a fare. Split hubs make you do it.'),
           h('li', {}, h('b', {}, 'Doors: '), 'you get off at the door you are standing by. Walk through the carriages (← →, slowly: it is crowded) to the one nearest the exit you need.'),
           h('li', {}, h('b', {}, 'Closures: '), 'a passage, escalator or stairs can be shut for works. Find another way.'),
+          h('li', {}, h('b', {}, 'Route guide: '), 'on Monday yellow arrows and the NAV line show the way; on Tuesday only the signs for your next line light up; after that you are on your own.'),
         ))),
       h('p', { class: 'dim' }, 'Each day is generated from a seed and checked by a solver: a perfect commuter can always make it with time to spare, even with the longest queues.'),
       back));
@@ -279,6 +290,32 @@
   }
 
   // ------------------------------------------------------------------ result
+
+  function tutorialResult(game, r) {
+    const onTime = !r.late;
+    const w = game.week;
+    const inProgress = w && w.weekday <= 4 && w.history.length > 0; // replayed mid-week: keep that week
+    const trip = r.arrival !== null ? r.arrival - game.day.startTime : null;
+    show(
+      h(
+        'div',
+        { class: 'card small-card tutorial-result' },
+        h('p', { class: 'kicker' }, 'Day 0 入职 · Tutorial'),
+        h('h2', {}, r.how !== 'office' ? 'You gave up on the first day' : onTime ? 'First day: made it ✓' : 'First day: made it, late'),
+        h('p', { class: 'lead' }, r.arrival !== null ? `Clocked in ${fmtClock(r.arrival, true)} after ${Math.round(trip / 60)} minutes on the metro${onTime ? `, ${fmtDuration(r.margin)} early.` : '.'}` : 'The office will call.'),
+        r.learned.length ? h('ul', { class: 'notes learned' }, ...r.learned.map((t) => h('li', {}, `✓ ${t}`))) : null,
+        r.missed.length ? h('p', { class: 'dim' }, `Not met today: ${r.missed.join(', ')}. The help screen (H) explains them.`) : null,
+        h('p', {}, 'The week starts tomorrow. Monday still shows you the way; every day after that shows a little less, and adds a few more checkpoints.'),
+        h(
+          'div',
+          { class: 'menu' },
+          btn(inProgress ? `Back to the week — ${L.difficulty.WEEK[w.weekday].day} ${L.difficulty.WEEK[w.weekday].zh} ▸` : 'Start the week ▸', () => (inProgress ? game.continueWeek() : game.startWeek()), 'primary', { dataset: { testid: 'tutorial-start-week' } }),
+          btn('Replay the tutorial', () => game.startTutorial()),
+          btn('Back to title', () => game.toTitle(), 'ghost small'),
+        ),
+      ),
+    );
+  }
 
   function result(game, r) {
     const day = game.day;
@@ -444,5 +481,5 @@
       h('div', { class: 'menu' }, btn('Start a new week', () => game.startWeek(), 'primary'), btn('Title', () => game.toTitle()))));
   }
 
-  L.screens = { h, show, hideAll, btn, title, loading, error, briefing, pause, help, timetable, result, shop, weekSummary, lineChip, mapCanvas, routeRides };
+  L.screens = { h, show, hideAll, btn, title, loading, error, briefing, pause, help, timetable, result, tutorialResult, shop, weekSummary, lineChip, mapCanvas, routeRides };
 })(typeof self !== 'undefined' ? self : this);
