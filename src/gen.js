@@ -6,7 +6,12 @@
 // is regenerated from a derived seed. Level 0 is the tutorial cave.
 (function (root) {
   'use strict';
-  const { RNG, valueNoise } = root.CaveRNG || require('./rng.js');
+  const { RNG, valueNoise, sin, cos } = root.CaveRNG || require('./rng.js');
+  // Bump whenever a change to the generator changes the mazes it makes: the
+  // leaderboard only ranks dives replayed on the same version.
+  const GEN_VERSION = 'maze-1';
+  // Plain arithmetic only (no Math.hypot/sin/cos), so every JS engine builds the same maze.
+  const hyp = (x, y) => Math.sqrt(x * x + y * y);
 
   const C = {
     CELL_M: 0.5,        // metres per grid cell
@@ -117,7 +122,7 @@
       for (const e of edges) {
         const v = e.a === u ? e.b : e.b === u ? e.a : -1;
         if (v < 0) continue;
-        const d = dist[u] + Math.hypot(nodes[v].x - nodes[u].x, nodes[v].y - nodes[u].y);
+        const d = dist[u] + hyp(nodes[v].x - nodes[u].x, nodes[v].y - nodes[u].y);
         if (d < dist[v]) { dist[v] = d; prev[v] = u; }
       }
     }
@@ -143,7 +148,7 @@
 
   // ---------------------------------------------------------------- carving
   function edgePath(rng, wiggle, A, B, e) {
-    const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy);
+    const dx = B.x - A.x, dy = B.y - A.y, len = hyp(dx, dy);
     const nx = -dy / len, ny = dx / len;
     const amp = e.squeeze ? rng.range(0.5, 1.5) : rng.range(1, 4);
     const s0 = rng.range(0.25, 0.35), s1 = s0 + rng.range(0.3, 0.42);
@@ -151,7 +156,7 @@
     const steps = Math.max(2, Math.ceil(len / 0.5)), pts = [];
     for (let s = 0; s <= steps; s++) {
       const t = s / steps;
-      const off = amp * Math.sin(Math.PI * t) * wiggle(t * len + e.id * 97, e.id * 31);
+      const off = amp * sin(Math.PI * t) * wiggle(t * len + e.id * 97, e.id * 31);
       const w = e.squeeze ? bump(t, s0, s1, 0.1) : 0;
       let px = A.x + dx * t + nx * off, py = A.y + dy * t + ny * off;
       // Snap the narrowest part to cell centres so a squeeze is reliably three cells across.
@@ -173,7 +178,7 @@
       for (let cy = Math.max(1, Math.floor(y - R)); cy <= Math.min(H - 2, Math.ceil(y + R)); cy++) {
         if (floorY !== undefined && cy + 0.5 > floorY) continue;
         for (let cx = Math.max(1, Math.floor(x - R)); cx <= Math.min(W - 2, Math.ceil(x + R)); cx++) {
-          const d = Math.hypot(cx + 0.5 - x, cy + 0.5 - y);
+          const d = hyp(cx + 0.5 - x, cy + 0.5 - y);
           // Wall noise mostly pushes walls out, so rough walls rarely pinch a passage shut.
           if (d < r + rough * (0.35 + 0.8 * wall(cx, cy) + 0.3 * fine(cx, cy))) set(cy * W + cx, t);
           if (d < Math.min(r, 1.3)) protect[cy * W + cx] = 1;
@@ -199,7 +204,7 @@
         disc(n.x, n.y, n.r, 1.4, t, floorY);
         for (let k = 0; k < 4; k++) {
           const a = rng.range(0, Math.PI * 2), d = rng.range(0.2, 0.6) * n.r;
-          disc(n.x + Math.cos(a) * d * 1.3, n.y + Math.sin(a) * d * 0.7, n.r * rng.range(0.5, 0.8), 1.2, t, floorY);
+          disc(n.x + cos(a) * d * 1.3, n.y + sin(a) * d * 0.7, n.r * rng.range(0.5, 0.8), 1.2, t, floorY);
         }
       } else {
         disc(n.x, n.y, n.r, 1.0, t);
@@ -355,7 +360,7 @@
   // ---------------------------------------------------------------- lines (laid by the diver)
   function makeLine(pts, kind) {
     const cum = [0];
-    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + hyp(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
     return { kind, pts, cum, total: cum[cum.length - 1] };
   }
 
@@ -373,7 +378,7 @@
     for (let i = 1; i < line.pts.length; i++) {
       const a = line.pts[i - 1], b = line.pts[i], dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
       const t = l2 ? clamp(((x - a.x) * dx + (y - a.y) * dy) / l2, 0, 1) : 0;
-      const px = a.x + dx * t, py = a.y + dy * t, d = Math.hypot(x - px, y - py);
+      const px = a.x + dx * t, py = a.y + dy * t, d = hyp(x - px, y - py);
       if (d < best.d) best = { d, x: px, y: py, seg: i, s: line.cum[i - 1] + Math.sqrt(l2) * t };
     }
     return best;
@@ -422,7 +427,7 @@
         if (cave.pass[j] && midField[j] < midField[best]) best = j;
       }
       if (best === i) return fail('route walk stuck');
-      const step = Math.hypot((best % W) - x, ((best / W) | 0) - y);
+      const step = hyp((best % W) - x, ((best / W) | 0) - y);
       routeCells += step;
       routeCost += gasStep(cave)(i, step);
       i = best;
@@ -493,7 +498,7 @@
     for (const p of route) { maxDepth = Math.max(maxDepth, p.y * C.CELL_M); if (cave.tight[idx(p)]) tightCells++; }
     const junctions = g.nodes.filter((n) => n.kind !== 'mouth' && n.deg >= 3).length;
     const deadEnds = g.nodes.filter((n) => n.kind !== 'mouth' && n.kind !== 'goal' && n.deg === 1);
-    const straight = Math.hypot(goal.x - anchor.x, goal.y - anchor.y);
+    const straight = hyp(goal.x - anchor.x, goal.y - anchor.y);
 
     return {
       ok: true, seed, level, params: P, C, TAG, tutorial: !!P.tutorial,
@@ -528,7 +533,7 @@
     throw new Error(`No valid cave for seed ${seed} at level ${level}: ${reasons.join(', ')}`);
   }
 
-  const api = { generate, attempt, params, C, TAG, linePoint, nearestOnLine, makeLine, depthFactor, dijkstra, clearanceMap, NB };
+  const api = { generate, attempt, params, C, TAG, GEN_VERSION, linePoint, nearestOnLine, makeLine, depthFactor, dijkstra, clearanceMap, NB };
   root.CaveGen = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

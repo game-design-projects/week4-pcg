@@ -53,6 +53,18 @@
     };
   }
 
+  // Sine and cosine from + - * / and floor only. Math.sin and friends may
+  // differ in the last bit between JS engines, and the leaderboard replays a
+  // dive on the server, so everything the simulation computes must match.
+  const PI = 3.141592653589793, TAU = 6.283185307179586, HALF_PI = 1.5707963267948966;
+  function sin(x) {
+    x -= TAU * Math.floor((x + PI) / TAU);          // to [-pi, pi)
+    if (x > HALF_PI) x = PI - x; else if (x < -HALF_PI) x = -PI - x;   // to [-pi/2, pi/2]
+    const x2 = x * x;
+    return x * (1 - (x2 / 6) * (1 - (x2 / 20) * (1 - (x2 / 42) * (1 - (x2 / 72) * (1 - x2 / 110)))));
+  }
+  function cos(x) { return sin(x + HALF_PI); }
+
   // Short readable seed for new dives, e.g. "K7Q2ZP".
   function randomSeed() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -61,7 +73,7 @@
     return s;
   }
 
-  const api = { RNG, hashString, valueNoise, randomSeed };
+  const api = { RNG, hashString, valueNoise, randomSeed, sin, cos };
   root.CaveRNG = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

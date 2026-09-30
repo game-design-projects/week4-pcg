@@ -1,15 +1,24 @@
 // One dive: diver movement, laying and following the line, silt, gas, and the run log.
 (function (root) {
   'use strict';
-  const Gen = root.CaveGen;
+  const R = root.CaveRNG || require('./rng.js');
+  const Gen = root.CaveGen || require('./gen.js');
   const C = Gen.C;
 
+  // The simulation always steps at 60 Hz and uses only arithmetic that every
+  // JS engine rounds the same way (no Math.random, trig, exp or hypot), so a
+  // dive replayed from its inputs on the server ends exactly as it did here.
+  const STEP = 1 / 60;
+  const DRAG_STEP = 0.951229424500714;      // exp(-DRAG * STEP)
+  const SETTLE = 0.9990762306970642;        // 0.5 ** (SILT_TICK / SILT_HALF_LIFE)
+  const MAX_TICKS = 60 * 60 * 40;           // 40 minutes
+  const hyp = (x, y) => Math.sqrt(x * x + y * y);
+
   const SPEED_SWIM = C.SWIM_SPEED, SPEED_HARD = 6.5;   // cells/s
-  const ACCEL = 16, DRAG = 3.0;
+  const ACCEL = 16;
   const REACH = 1.4;           // how close a line must be to grab or tie into it, cells
   const TIE_ROCK = 2.2;        // clearance at or below this is close enough to rock to tie off
   const SILT_TICK = 0.1;       // silt field update interval, s
-  const SILT_HALF_LIFE = 75;   // s for suspended silt to halve (before spreading)
   const ZERO_VIS = 0.28;
 
   const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -35,6 +44,8 @@
     const N = dive.W * dive.H;
     this.silt = new Float32Array(N);
     this.siltNext = new Float32Array(N);
+    this.siltBox = null;           // bounds of the cells holding silt, in this.silt
+    this.staleBox = null;          // the same for this.siltNext (last step's field)
     this.stirredAt = new Float32Array(N).fill(-1);
     this.deposit = dive.deposit.slice();
     this.lines = [];               // every line the diver has laid
@@ -42,7 +53,13 @@
     this.t = 0;
     this.siltClock = 0;
     this.gas = C.P0;
-    this.diver = { x: dive.start.x, y: dive.start.y, vx: 0, vy: 0, face: 0, anim: 0, hard: false, tight: false, moving: false };
+    this.diver = { x: dive.start.x, y: dive.start.y, vx: 0, vy: 0, fx: 1, fy: 0, anim: 0, hard: false, tight: false, moving: false };
+    this.fxRng = new R.RNG(`${dive.seed}|${dive.level}|fx`);   // bubbles and puffs, seeded so replays match
+    this.tick = 0;
+    this.inputs = [];              // [tick, mask] at every change of input
+    this.lastMask = -1;
+    this.heldTicks = 0;
+    this.siltOuts = 0;
     this.hold = null;              // { line, s } while holding a line
     this.lastLine = -1;
     this.felt = null;              // which way the held line runs back
@@ -117,7 +134,7 @@
   // Direction along the line near arc length s, smoothed over the corners.
   Game.prototype.lineTangent = function (line, s) {
     const a = Gen.linePoint(line, Math.max(0, s - 1.5)), b = Gen.linePoint(line, Math.min(line.total, s + 1.5));
-    const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1;
+    const dx = b.x - a.x, dy = b.y - a.y, l = hyp(dx, dy) || 1;
     return { x: dx / l, y: dy / l };
   };
 
@@ -134,7 +151,7 @@
     const a = this.d.anchor;
     const near = this.nearestLine(d.x, d.y, REACH);
     let start, parent = -1, anchored = false, how;
-    if (Math.hypot(d.x - a.x, d.y - a.y) < 2.5) { start = { x: a.x, y: a.y }; anchored = true; how = 'at the tie-off post in the pool'; }
+    if (hyp(d.x - a.x, d.y - a.y) < 2.5) { start = { x: a.x, y: a.y }; anchored = true; how = 'at the tie-off post in the pool'; }
     else if (near) { start = { x: near.x, y: near.y }; parent = near.line; how = 'into an existing line'; }
     else if ((this.d.clear[this.idx(d.x, d.y)] || 0) <= TIE_ROCK) { start = { x: d.x, y: d.y }; how = 'to the rock'; }
     else { this.toast('Nothing to tie to here. Get close to the rock, a line, or the post in the pool.'); return; }
@@ -149,7 +166,7 @@
 
   Game.prototype.tieOff = function (msg) {
     const line = this.lines[this.reel.active], d = this.diver;
-    const last = line.pts[line.pts.length - 1], step = Math.hypot(d.x - last.x, d.y - last.y);
+    const last = line.pts[line.pts.length - 1], step = hyp(d.x - last.x, d.y - last.y);
     if (step > 0.05 && this.hold === null) {
       line.pts.push({ x: d.x, y: d.y });
       this.reel.left -= step;
@@ -184,14 +201,14 @@
     const n = pts.length;
     let cut = -1;
     for (let i = Math.max(1, n - 80); i <= n - 2 && cut < 0; i++) {
-      if (Math.hypot(d.x - pts[i].x, d.y - pts[i].y) < (i === n - 2 ? 0.9 : 1.3)) cut = i;
+      if (hyp(d.x - pts[i].x, d.y - pts[i].y) < (i === n - 2 ? 0.9 : 1.3)) cut = i;
     }
     if (cut >= 0) {
       this.reel.left += line.total - line.cum[cut];
       pts.length = cut + 1;
       changed = true;
     }
-    const last = pts[pts.length - 1], step = Math.hypot(d.x - last.x, d.y - last.y);
+    const last = pts[pts.length - 1], step = hyp(d.x - last.x, d.y - last.y);
     if (step >= 1) {
       pts.push({ x: d.x, y: d.y });
       this.reel.left -= step;
@@ -222,12 +239,16 @@
     for (let i = 0; i < this.silt.length; i++) {
       if (d.open[i] && d.exitDist[i] > 6) { this.silt[i] = 3; this.stirredAt[i] = this.t; }
     }
+    this.siltBox = { x0: 0, y0: 0, x1: d.W - 1, y1: d.H - 1 };
     this.siltDirty = true;
   };
 
   // ------------------------------------------------------------------ update
-  Game.prototype.update = function (dt, input) {
+  Game.prototype.update = function (dt, raw) {
     if (this.done) return;
+    dt = STEP;
+    const input = this.record(raw);
+    if (input.reel) this.toggleReel();
     this.t += dt;
     const d = this.diver, dive = this.d;
     const i = this.idx(d.x, d.y);
@@ -255,7 +276,7 @@
     }
 
     let ix = input.x, iy = input.y;
-    const il = Math.hypot(ix, iy);
+    const il = hyp(ix, iy);
     if (il > 1) { ix /= il; iy /= il; }
     const moving = il > 0.1;
     d.hard = input.hard && moving;
@@ -286,21 +307,21 @@
     } else {
       if (vis < 0.5) maxSpeed *= 0.4 + 1.2 * vis;   // groping in silt without a line
       d.vx += ix * ACCEL * dt; d.vy += iy * ACCEL * dt;
-      const drag = Math.exp(-DRAG * dt);
-      d.vx *= drag; d.vy *= drag;
-      const sp = Math.hypot(d.vx, d.vy);
+      d.vx *= DRAG_STEP; d.vy *= DRAG_STEP;
+      const sp = hyp(d.vx, d.vy);
       if (sp > maxSpeed) { d.vx *= maxSpeed / sp; d.vy *= maxSpeed / sp; }
       this.move(dt);
       if (this.reel.active !== null) this.payOut();
     }
-    const speed = Math.hypot(d.vx, d.vy);
+    const speed = hyp(d.vx, d.vy);
     d.moving = speed > 0.4;
     if (speed > 0.3) {
-      const target = Math.atan2(d.vy, d.vx);
-      let diff = target - d.face;
-      while (diff > Math.PI) diff -= 2 * Math.PI;
-      while (diff < -Math.PI) diff += 2 * Math.PI;
-      d.face += diff * Math.min(1, 7 * dt);
+      // Turn toward the direction of travel, kept as a unit vector (no trig).
+      const k = Math.min(1, 7 * dt);
+      let fx = d.fx + (d.vx / speed - d.fx) * k, fy = d.fy + (d.vy / speed - d.fy) * k;
+      const fl = hyp(fx, fy);
+      if (fl < 1e-6) { fx = d.vx / speed; fy = d.vy / speed; } else { fx /= fl; fy /= fl; }
+      d.fx = fx; d.fy = fy;
     }
     d.anim += dt * (0.8 + speed * 0.9);
 
@@ -312,12 +333,32 @@
     this.breathe(dt, vis);
     this.updateEffects(dt);
     this.gasAndEvents(dt, vis, moving);
+    if (this.hold) this.heldTicks++;
+    this.tick++;
+  };
+
+  // Keyboard-style input: 8 directions, hard kick, hold, and the reel key.
+  // Each change is kept as [tick, mask]; that list and the seed are all the
+  // server needs to replay a dive.
+  const quant = (v) => (v > 0.38 ? 1 : v < -0.38 ? -1 : 0);
+  function encode(inp) {
+    const x = quant(inp.x || 0), y = quant(inp.y || 0);
+    return (x < 0 ? 1 : 0) | (x > 0 ? 2 : 0) | (y < 0 ? 4 : 0) | (y > 0 ? 8 : 0) |
+      (inp.hard ? 16 : 0) | (inp.hold ? 32 : 0) | (inp.reel ? 64 : 0);
+  }
+  function decode(m) {
+    return { x: (m & 2 ? 1 : 0) - (m & 1 ? 1 : 0), y: (m & 8 ? 1 : 0) - (m & 4 ? 1 : 0), hard: !!(m & 16), hold: !!(m & 32), reel: !!(m & 64) };
+  }
+  Game.prototype.record = function (input) {
+    const mask = encode(input || {});
+    if (mask !== this.lastMask) { this.inputs.push([this.tick, mask]); this.lastMask = mask; }
+    return decode(mask);
   };
 
   // Circle-vs-grid collision. Hitting rock at speed stirs a big cloud.
   Game.prototype.move = function (dt) {
     const d = this.diver, R = C.DIVER_R;
-    const impact = Math.hypot(d.vx, d.vy);
+    const impact = hyp(d.vx, d.vy);
     let hit = false;
     d.x += d.vx * dt; d.y += d.vy * dt;
     for (let iter = 0; iter < 3; iter++) {
@@ -325,7 +366,7 @@
         for (let cx = Math.floor(d.x - R) - 1; cx <= Math.floor(d.x + R) + 1; cx++) {
           if (this.isOpen(cx + 0.5, cy + 0.5)) continue;
           const px = clamp(d.x, cx, cx + 1), py = clamp(d.y, cy, cy + 1);
-          let nx = d.x - px, ny = d.y - py, dist = Math.hypot(nx, ny);
+          let nx = d.x - px, ny = d.y - py, dist = hyp(nx, ny);
           if (dist >= R) continue;
           if (dist < 1e-6) { nx = 0; ny = -1; dist = 0; } else { nx /= dist; ny /= dist; }
           const push = R - dist;
@@ -350,13 +391,14 @@
   Game.prototype.stir = function (dt, speed) {
     const d = this.diver;
     if (speed < 0.3) return;
-    const fx = d.x - Math.cos(d.face) * 1.7, fy = d.y - Math.sin(d.face) * 1.7 + (d.hard ? 0.6 : 0.2);
+    const fx = d.x - d.fx * 1.7, fy = d.y - d.fy * 1.7 + (d.hard ? 0.6 : 0.2);
     let power = d.hard ? 3.5 : 0.28;
     if (d.tight) power *= 4.5;   // in a squeeze, fins and body touch the floor
     if (this.hold && !d.hard) power *= 0.6;
     const added = this.stirAround(fx, fy, d.hard ? 2.8 : 1.9, power * (speed / SPEED_SWIM) * dt * 2.2);
-    if (added > 0.02 && Math.random() < added * 8) {
-      this.puffs.push({ x: fx + (Math.random() - 0.5), y: fy + (Math.random() - 0.3), t: 0, life: 1.8 + Math.random(), s: 0.8 + Math.random() * 0.8 });
+    const rnd = this.fxRng;
+    if (added > 0.02 && rnd.float() < added * 8) {
+      this.puffs.push({ x: fx + (rnd.float() - 0.5), y: fy + (rnd.float() - 0.3), t: 0, life: 1.8 + rnd.float(), s: 0.8 + rnd.float() * 0.8 });
     }
   };
 
@@ -368,10 +410,11 @@
         if (cx < 0 || cy < 0 || cx >= W || cy >= this.d.H) continue;
         const i = cy * W + cx;
         if (!this.d.open[i] || dep[i] <= 0) continue;
-        const f = 1 - Math.hypot(cx + 0.5 - x, cy + 0.5 - y) / r;
+        const f = 1 - hyp(cx + 0.5 - x, cy + 0.5 - y) / r;
         if (f <= 0) continue;
         const a = dep[i] * amount * f;
         s[i] = Math.min(4, s[i] + a);
+        this.markSilt(cx, cy);
         dep[i] = Math.max(0, dep[i] - a * 0.03);
         // Remember when a clear cell first got clouded, not every later kick.
         if (this.stirredAt[i] < 0 || s[i] - a < 0.05) this.stirredAt[i] = this.t;
@@ -394,29 +437,59 @@
     return best;
   };
 
-  // Spread and settle the suspended silt.
+  Game.prototype.markSilt = function (x, y) {
+    const b = this.siltBox;
+    if (!b) this.siltBox = { x0: x, y0: y, x1: x, y1: y };
+    else {
+      if (x < b.x0) b.x0 = x; else if (x > b.x1) b.x1 = x;
+      if (y < b.y0) b.y0 = y; else if (y > b.y1) b.y1 = y;
+    }
+  };
+  // Fill the whole cave with silt (the autopilot's worst case).
+  Game.prototype.fillSilt = function (v) {
+    this.silt.fill(v);
+    this.siltBox = { x0: 0, y0: 0, x1: this.d.W - 1, y1: this.d.H - 1 };
+  };
+
+  // Spread and settle the suspended silt. Only the cells that hold silt, their
+  // neighbours, and whatever last step's buffer still holds need updating;
+  // everywhere else the result is zero either way.
   Game.prototype.stepSilt = function () {
     const W = this.d.W, H = this.d.H, open = this.d.open, s = this.silt, n = this.siltNext;
-    const settle = Math.pow(0.5, SILT_TICK / SILT_HALF_LIFE), DIFF = 0.14;
-    for (let y = 1; y < H - 1; y++) {
-      for (let x = 1; x < W - 1; x++) {
+    const a = this.siltBox, b = this.staleBox;
+    if (!a && !b) return;
+    const x0 = Math.max(1, Math.min(a ? a.x0 - 1 : W, b ? b.x0 : W)), x1 = Math.min(W - 2, Math.max(a ? a.x1 + 1 : -1, b ? b.x1 : -1));
+    const y0 = Math.max(1, Math.min(a ? a.y0 - 1 : H, b ? b.y0 : H)), y1 = Math.min(H - 2, Math.max(a ? a.y1 + 1 : -1, b ? b.y1 : -1));
+    const settle = SETTLE, DIFF = 0.14;
+    let bx0 = W, by0 = H, bx1 = -1, by1 = -1;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
         const i = y * W + x;
         const v = s[i];
         if (!open[i]) { n[i] = 0; continue; }
         const l = open[i - 1] ? s[i - 1] : v, r = open[i + 1] ? s[i + 1] : v;
         const u = open[i - W] ? s[i - W] : v, dn = open[i + W] ? s[i + W] : v;
         const nv = (v + DIFF * ((l + r + u + dn) * 0.25 - v)) * settle;
-        n[i] = nv < 0.002 ? 0 : nv;
+        if (nv < 0.002) n[i] = 0;
+        else {
+          n[i] = nv;
+          if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
+          if (y < by0) by0 = y; if (y > by1) by1 = y;
+        }
       }
     }
     this.silt = n; this.siltNext = s;
+    // The old buffer still holds this step's input, up to its bounds; the
+    // next step writes into it, so it must cover that region too.
+    this.staleBox = a;
+    this.siltBox = bx1 >= 0 ? { x0: bx0, y0: by0, x1: bx1, y1: by1 } : null;
     this.siltDirty = true;
   };
 
   // How far the lamp reaches through the silt in front of the diver.
   Game.prototype.updateLamp = function () {
     const d = this.diver, max = this.d.params.visibility;
-    const cx = Math.cos(d.face), cy = Math.sin(d.face);
+    const cx = d.fx, cy = d.fy;
     let tau = 0, reach = max;
     for (let r = 0.5; r <= max; r += 0.5) {
       tau += this.siltAt(d.x + cx * r, d.y + cy * r) * 0.5 * 0.9;
@@ -431,15 +504,15 @@
     this.breath += dt * (d.hard ? 1.6 : 1) * (vis < ZERO_VIS ? 1.3 : 1);
     if (this.breath > 3.2) {
       this.breath = 0;
-      const hx = d.x + Math.cos(d.face) * 1.3, hy = d.y + Math.sin(d.face) * 1.3 - 0.4;
-      for (let k = 0; k < 6; k++) this.bubbles.push({ x: hx + (Math.random() - 0.5) * 0.4, y: hy, vy: -(2 + Math.random() * 2), r: 0.06 + Math.random() * 0.1, ph: Math.random() * 6 });
+      const hx = d.x + d.fx * 1.3, hy = d.y + d.fy * 1.3 - 0.4, rnd = this.fxRng;
+      for (let k = 0; k < 6; k++) this.bubbles.push({ x: hx + (rnd.float() - 0.5) * 0.4, y: hy, vy: -(2 + rnd.float() * 2), r: 0.06 + rnd.float() * 0.1, ph: rnd.float() * 6 });
     }
   };
 
   Game.prototype.updateEffects = function (dt) {
     this.bubbles = this.bubbles.filter((b) => {
       b.y += b.vy * dt; b.ph += dt * 6;
-      b.x += Math.sin(b.ph) * 0.4 * dt;
+      b.x += R.sin(b.ph) * 0.4 * dt;
       if (!this.isOpen(b.x, b.y - 0.3)) {
         if (b.y > 2) this.stirAround(b.x, b.y - 0.2, 1.2, 0.02);
         return false;
@@ -473,7 +546,7 @@
       this.maxPen = { m: this.pen, t: this.t, gas: this.gas };
     }
     // The turn is the last moment the diver was still at their furthest point.
-    if (this.pen > this.maxPen.m - 1.5) this.atMax = { t: this.t, gas: this.gas };
+    if (this.pen > this.maxPen.m - 1.5) this.atMax = { t: this.t, gas: this.gas, x: d.x, y: d.y };
 
     if (before > B.turn && this.gas <= B.turn) {
       this.flags.turnAt = { t: this.t, pen: this.pen };
@@ -493,12 +566,13 @@
       this.event('turned', `Turned for the exit ${Math.round(this.maxPen.m)} m in, with ${Math.round(at.gas)} bar${late ? `, ${Math.round(at.t - this.flags.turnAt.t)} s after turn pressure` : ''}.`);
       const e = this.log[this.log.length - 1];
       e.t = at.t; e.late = late; e.after = late ? at.t - this.flags.turnAt.t : 0; e.gas = Math.round(at.gas); e.pen = Math.round(this.maxPen.m);
+      e.x = at.x; e.y = at.y;
     }
 
     // Dead ends.
     for (let k = 0; k < dive.deadEnds.length; k++) {
       const de = dive.deadEnds[k];
-      if (!this.deadEndsSeen.has(k) && Math.hypot(d.x - de.x, d.y - de.y) < de.r + 1.5) {
+      if (!this.deadEndsSeen.has(k) && hyp(d.x - de.x, d.y - de.y) < de.r + 1.5) {
         this.deadEndsSeen.add(k);
         this.event('dead_end', `Reached a dead end ${Math.round(this.pen)} m in.`);
         this.toast('Dead end.', 2.5);
@@ -511,6 +585,7 @@
       if (!this.flags.zeroSince) {
         this.flags.zeroSince = this.t;
         const own = this.tutorial ? -1 : this.oldestStirNear(d.x, d.y, 2.5, 12);
+        this.siltOuts++;
         this.event('zero_vis', own >= 0 ? `Swam back into the silt you stirred up at ${fmt(own)}.` : 'Visibility dropped to almost nothing.');
         if (own >= 0) this.log[this.log.length - 1].own = own;
       }
@@ -548,7 +623,7 @@
       this.felt = { x: p.x, y: p.y, ex: p.ex, ey: p.ey, out: this.connected(this.hold.line) };
     }
 
-    if (!this.goalTagged && Math.hypot(d.x - dive.goal.x, d.y - dive.goal.y) < 3.2) {
+    if (!this.goalTagged && hyp(d.x - dive.goal.x, d.y - dive.goal.y) < 3.2) {
       this.goalTagged = true;
       this.event('goal', `Reached the end chamber and tagged it, ${Math.round(this.pen)} m in.`);
       this.toast(this.tutorial ? 'You made it to the end chamber.' : 'End chamber: tagged. Now follow your line home.', 5);
@@ -625,7 +700,29 @@
     return { headline, notes, timeline, stats: { time: fmt(res.time), maxPen: Math.round(this.maxPen.m), zeroVis: Math.round(this.zeroVisTime), gas: Math.round(res.gas), score: res.score, laid: Math.round(this.laidMetres()) } };
   };
 
-  const api = { Game, fmt, ZERO_VIS, REACH, TUTORIAL };
+  // Re-run a dive from its maze and recorded inputs (the leaderboard Worker does this).
+  Game.validInputs = function (inputs) {
+    if (!Array.isArray(inputs) || inputs.length > 50000) return false;
+    let last = -1;
+    for (const e of inputs) {
+      if (!Array.isArray(e) || e.length !== 2) return false;
+      const [t, m] = e;
+      if (!Number.isInteger(t) || !Number.isInteger(m) || t <= last || t > MAX_TICKS || m < 0 || m > 127) return false;
+      last = t;
+    }
+    return true;
+  };
+  Game.replay = function (dive, inputs, mapMode) {
+    const g = new Game(dive, mapMode || 'none');
+    let k = 0, mask = 0;
+    while (!g.done && g.tick < MAX_TICKS) {
+      while (k < inputs.length && inputs[k][0] <= g.tick) mask = inputs[k++][1];
+      g.update(STEP, decode(mask));
+    }
+    return g;
+  };
+
+  const api = { Game, fmt, ZERO_VIS, REACH, TUTORIAL, STEP, MAX_TICKS, encode, decode };
   root.CaveGame = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
