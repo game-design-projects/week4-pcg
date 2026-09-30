@@ -1,0 +1,20 @@
+# The Cave Diving collector and leaderboard. Its own Worker and D1 database:
+# nothing here is shared with Late or the Week 3 game.
+name = "cave-diving-telemetry"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Fill in after `npm run db:create` prints the id (see the project README).
+[[d1_databases]]
+binding = "DB"
+database_name = "cave-diving-telemetry"
+database_id = "REPLACE_WITH_THE_ID_FROM_wrangler_d1_create"
+
+# Replaying a submitted dive runs the whole simulation again: about 20-60 ms
+# of CPU for a daily maze, plus 30-110 ms to generate the maze the first time
+# an isolate sees that board. That is over the Workers Free plan's 10 ms per
+# request, so the leaderboard needs the Workers Paid plan (its default CPU
+# limit is far above this). Telemetry alone fits in the free plan.
+
+# READ_TOKEN (for exporting sessions and moderating scores) is a secret:
+#   npx wrangler secret put READ_TOKEN

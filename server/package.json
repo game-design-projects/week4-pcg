@@ -1,0 +1,18 @@
+{
+  "name": "cave-diving-telemetry-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker + D1 for Cave Diving: anonymous opt-in playtest telemetry and the server-replayed daily maze leaderboard.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "db:create": "wrangler d1 create cave-diving-telemetry",
+    "db:migrate": "wrangler d1 execute cave-diving-telemetry --remote --file=./migrations/0001_init.sql",
+    "db:migrate:local": "wrangler d1 execute cave-diving-telemetry --local --file=./migrations/0001_init.sql",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

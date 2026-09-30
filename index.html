@@ -13,30 +13,30 @@
     <div class="card">
       <h1>Cave Diving</h1>
       <p class="tag">A generated flooded maze, a reel of line, and a third of your gas for the way in.</p>
-      <div class="row">
+      <div class="row actions">
         <button id="start" class="primary">Start dive</button>
-        <span id="progress" class="muted"></span>
+        <button id="daily" title="Today's shared maze, with a leaderboard">Daily maze</button>
       </div>
+      <p id="progress" class="muted status"></p>
       <details>
         <summary>Dive options</summary>
         <div class="options">
-          <label>Seed <input id="opt-seed" placeholder="random" maxlength="16" autocomplete="off"></label>
-          <label>Level
-            <select id="opt-level">
-              <option value="auto">Auto (adapts to you)</option>
-              <option value="0">0 (tutorial)</option><option>1</option><option>2</option><option>3</option><option>4</option>
-              <option>5</option><option>6</option><option>7</option><option>8</option><option>9</option>
-            </select>
-          </label>
-          <label>Map
-            <select id="opt-map">
-              <option value="auto">Auto (less as you improve)</option>
-              <option value="full">Full survey, any time</option>
-              <option value="entrance">Only at the entrance</option>
-              <option value="none">No map</option>
-            </select>
-          </label>
-          <button id="reset" class="link">Reset progress</button>
+          <label for="opt-seed">Seed</label>
+          <input id="opt-seed" placeholder="random" maxlength="16" autocomplete="off" spellcheck="false">
+          <label for="opt-level">Level</label>
+          <select id="opt-level">
+            <option value="auto">Auto (adapts to you)</option>
+            <option value="0">0 (tutorial)</option><option>1</option><option>2</option><option>3</option><option>4</option>
+            <option>5</option><option>6</option><option>7</option><option>8</option><option>9</option>
+          </select>
+          <label for="opt-map">Map</label>
+          <select id="opt-map">
+            <option value="auto">Auto (less as you improve)</option>
+            <option value="full">Full survey, any time</option>
+            <option value="entrance">Only at the entrance</option>
+            <option value="none">No map</option>
+          </select>
+          <div class="options-foot"><button id="reset" class="link">Reset progress</button></div>
         </div>
       </details>
       <details>
@@ -48,29 +48,92 @@
           <li>Kicking hard, bumping rock and squeezing through tight spots stir up silt. It hangs in the water for a long time, so the mess you make on the way in is waiting for you on the way out.</li>
           <li>Hold Space near a line to keep a hand on it. In zero visibility it is the only reliable way out. The arrow shows which way it runs back.</li>
         </ul>
-        <p class="muted">WASD / arrows: swim · Shift: kick hard · R: tie the reel in / off · Space (hold): follow a line · M: map · H: controls · Esc: pause</p>
+        <dl class="keys">
+          <dt>WASD / arrows</dt><dd>swim</dd>
+          <dt>Shift</dt><dd>kick hard</dd>
+          <dt>R</dt><dd>tie the reel in / off</dd>
+          <dt>Space (hold)</dt><dd>follow a line</dd>
+          <dt>M · H · Esc</dt><dd>map · controls · pause</dd>
+        </dl>
       </details>
+      <div class="card-foot">
+        <button id="privacy-open" class="link">Privacy</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="consent" class="screen art hidden">
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="consent-title">
+      <p class="kicker">Before your first dive</p>
+      <h2 id="consent-title">Share anonymous playtest data?</h2>
+      <p class="lead">It tells us whether our generated mazes are fair, too easy or too hard: where divers turn, how often they silt out, and whether they lay a line. The game plays exactly the same either way.</p>
+      <div class="consent-lists">
+        <div>
+          <h3>We share</h3>
+          <ul class="ticks">
+            <li>The seed, level and map setting of each dive</li>
+            <li>What happened: home or out of gas, gas left, where you turned, silt-outs, how you used the line, and the keys you pressed</li>
+            <li>A random player id made in this browser</li>
+          </ul>
+        </div>
+        <div>
+          <h3>We never share</h3>
+          <ul class="crosses">
+            <li>Your name or any account</li>
+            <li>Your IP address or location</li>
+            <li>Cookies or cross-site tracking</li>
+          </ul>
+        </div>
+      </div>
+      <div class="row actions">
+        <button id="consent-yes" class="primary">Share anonymous data</button>
+        <button id="consent-no">Keep it on this device</button>
+      </div>
+      <p id="consent-fine" class="muted fine"></p>
+    </div>
+  </section>
+
+  <section id="privacy" class="screen art hidden">
+    <div class="card">
+      <h2>Privacy</h2>
+      <p class="lead">Anonymous playtest data: <b id="privacy-status"></b>.</p>
+      <p id="privacy-count" class="muted"></p>
+      <p id="privacy-collector" class="muted"></p>
+      <p class="muted">The daily maze leaderboard is separate. A dive only goes there when you press Submit, under the nickname you choose.</p>
+      <div class="stack">
+        <button id="privacy-toggle"></button>
+        <button id="privacy-export">Export my data (JSON)</button>
+        <button id="privacy-clear">Delete my data on this device</button>
+      </div>
+      <div class="row actions">
+        <button id="privacy-back" class="primary">Back</button>
+      </div>
     </div>
   </section>
 
   <section id="brief" class="screen hidden">
     <div class="card wide">
-      <h2 id="brief-title">Dive plan</h2>
-      <div id="brief-facts" class="facts"></div>
-      <div id="brief-map" class="mapbox"></div>
-      <p id="brief-note" class="muted"></p>
-      <div class="row">
-        <button id="descend" class="primary">Descend (Enter)</button>
+      <div class="card-body">
+        <h2 id="brief-title">Dive plan</h2>
+        <p id="brief-meta" class="meta"></p>
+        <div id="brief-facts" class="facts"></div>
+        <div id="brief-map" class="mapbox"></div>
+        <p id="brief-note" class="note"></p>
+        <p id="brief-gen" class="muted fine"></p>
+      </div>
+      <div class="card-actions">
+        <button id="descend" class="primary">Descend <kbd>Enter</kbd></button>
         <button id="brief-back">Back</button>
       </div>
     </div>
   </section>
 
   <section id="pause" class="screen hidden">
-    <div class="card">
+    <div class="card small">
       <h2>Paused</h2>
-      <div class="row">
-        <button id="resume" class="primary">Resume (Esc)</button>
+      <p class="muted">Your gas isn't running while the game is paused.</p>
+      <div class="row actions">
+        <button id="resume" class="primary">Resume <kbd>Esc</kbd></button>
         <button id="end-dive">End this dive</button>
       </div>
     </div>
@@ -78,26 +141,48 @@
 
   <section id="result" class="screen hidden">
     <div class="card wide">
-      <h2 id="result-title"></h2>
-      <p id="result-headline" class="headline"></p>
-      <div id="result-stats" class="facts"></div>
-      <h3 id="result-notes-title">What happened</h3>
-      <ul id="result-notes" class="notes"></ul>
-      <h3>Dive log</h3>
-      <ol id="result-log" class="log"></ol>
-      <p id="result-next" class="muted"></p>
-      <div class="row">
-        <button id="next" class="primary">Next dive (Enter)</button>
+      <div class="card-body">
+        <h2 id="result-title"></h2>
+        <p id="result-headline" class="headline"></p>
+        <div id="result-stats" class="facts"></div>
+        <section id="result-board" class="board-block" hidden>
+          <h3 id="board-title">Daily maze</h3>
+          <div id="board-form" class="board-form">
+            <input id="board-nick" maxlength="20" placeholder="Nickname" aria-label="Nickname" autocomplete="off" spellcheck="false">
+            <button id="board-submit">Submit to the daily board</button>
+          </div>
+          <p id="board-status" class="muted"></p>
+          <button id="board-show" class="link">Show today's board</button>
+          <div id="board-table"></div>
+        </section>
+        <div id="result-cols" class="result-cols">
+          <div id="result-notes-box">
+            <h3>What happened</h3>
+            <ul id="result-notes" class="notes"></ul>
+          </div>
+          <div>
+            <h3>Dive log</h3>
+            <ol id="result-log" class="log"></ol>
+          </div>
+        </div>
+        <p id="result-next" class="note"></p>
+      </div>
+      <div class="card-actions">
+        <button id="next" class="primary">Next dive <kbd>Enter</kbd></button>
         <button id="replay">Replay this cave</button>
         <button id="to-title">Title</button>
       </div>
     </div>
   </section>
 
+  <script src="src/config.js"></script>
   <script src="src/rng.js"></script>
   <script src="src/gen.js"></script>
   <script src="src/game.js"></script>
+  <script src="src/daily.js"></script>
   <script src="src/render.js"></script>
+  <script src="src/telemetry.js"></script>
+  <script src="src/leaderboard.js"></script>
   <script src="src/main.js"></script>
 </body>
 </html>

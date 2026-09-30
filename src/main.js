@@ -2,6 +2,7 @@
 (function () {
   'use strict';
   const Gen = window.CaveGen, { Game } = window.CaveGame, { Renderer, loadArt, renderSurvey } = window.CaveRender;
+  const Daily = window.CaveDaily, Telemetry = window.CaveTelemetry, Leaderboard = window.CaveLeaderboard;
   const $ = (id) => document.getElementById(id);
   const STORE = 'caveDiving.progress.v1';
 
@@ -42,52 +43,60 @@
   let mode = 'title';          // title | brief | dive | pause | result
   const ui = { showMap: false, showHelp: true, diveNo: 1 };
   const keys = new Set();
+  let pendingReel = false;
   const params = new URLSearchParams(location.search);
   if (params.get('seed')) $('opt-seed').value = params.get('seed');
   if (params.get('level')) $('opt-level').value = params.get('level');
   if (params.get('map')) $('opt-map').value = params.get('map');
 
   function show(id) {
-    for (const s of ['title', 'brief', 'pause', 'result']) $(s).classList.toggle('hidden', s !== id);
+    for (const s of ['title', 'consent', 'privacy', 'brief', 'pause', 'result']) $(s).classList.toggle('hidden', s !== id);
     mode = id || 'dive';
   }
   function updateTitle() {
     $('progress').textContent = progress.level === 0 ? 'Starts with the tutorial' : `Dive ${progress.dive} · level ${progress.level}`;
   }
 
-  function plan(seed, level, mapMode) {
+  // choices records how the level and map were picked (auto, set, or daily), for telemetry.
+  function plan(seed, level, mapMode, board, choices) {
     const t0 = performance.now();
     const dive = Gen.generate(seed, level);
-    current = { seed, level, mapMode, dive, genMs: Math.round(performance.now() - t0) };
+    current = { seed, level, mapMode, board: board || null, choices, dive, genMs: Math.round(performance.now() - t0) };
     showBrief();
   }
 
-  function planFromOptions() {
-    const seed = ($('opt-seed').value.trim().toUpperCase()) || CaveRNG.randomSeed();
+  function planFromOptions(seedIn) {
+    const seed = (seedIn !== undefined ? seedIn : $('opt-seed').value.trim().toUpperCase()) || CaveRNG.randomSeed();
     const lv = $('opt-level').value, level = lv === 'auto' ? progress.level : Number(lv);
     const mv = $('opt-map').value, mapMode = mv === 'auto' ? autoMap(level) : mv;
-    plan(seed, level, mapMode);
+    plan(seed, level, mapMode, null, { level: lv === 'auto' ? 'auto' : 'set', map: mv === 'auto' ? 'auto' : 'set' });
+  }
+
+  function planDaily() {
+    const b = Daily.parse(Daily.boardFor(new Date()));
+    plan(b.seed, b.level, b.mapMode, b.board, { level: 'daily', map: 'daily' });
   }
 
   function fact(value, label) { return `<div class="fact"><b>${value}</b><span>${label}</span></div>`; }
 
   function showBrief() {
     const d = current.dive, m = d.measures, B = d.budget;
-    $('brief-title').textContent = d.tutorial ? 'Level 0: laying a guideline' : `Dive ${progress.dive}: plan`;
+    $('brief-title').textContent = current.board ? `Daily maze ${current.board.slice(6)}` : d.tutorial ? 'Level 0: laying a guideline' : `Dive ${progress.dive}: plan`;
+    const mapText = { full: 'full survey', entrance: 'survey at the entrance only', none: 'no survey' }[current.mapMode];
+    $('brief-meta').textContent = `Seed ${d.seed} \u00b7 level ${d.level}${d.tutorial ? ' (tutorial)' : ''} \u00b7 ${mapText}`;
     $('brief-facts').innerHTML = (d.tutorial ? [
       fact(`${B.P0} bar`, 'starting gas'),
-      fact(`${Math.round(B.turn)} bar`, 'turn pressure (one third used)'),
-      fact(`${m.reelLength} m`, 'line on your reel'),
-      fact('R', 'tie the reel in, and tie it off'),
-      fact('Space', 'hold the line and follow it'),
+      fact(`${Math.round(B.turn)} bar`, 'turn pressure'),
+      fact(`${m.reelLength} m`, 'line on the reel'),
+      fact('R', 'tie in, tie off'),
+      fact('Space', 'hold the line'),
     ] : [
       fact(`${B.P0} bar`, 'starting gas'),
-      fact(`${Math.round(B.turn)} bar`, 'turn pressure (one third used)'),
-      fact(`${m.reelLength} m`, 'line on your reel'),
-      fact(`${m.junctions}`, 'junctions in the maze'),
+      fact(`${Math.round(B.turn)} bar`, 'turn pressure'),
+      fact(`${m.reelLength} m`, 'line on the reel'),
+      fact(`${m.junctions}`, 'junctions'),
       fact(`${m.deadEnds}`, 'dead ends'),
-      fact(`${Math.round(d.params.visibility * Gen.C.CELL_M)} m`, 'lamp reach in clear water'),
-      fact(`${d.seed} \u00b7 L${d.level}`, 'seed \u00b7 level'),
+      fact(`${Math.round(d.params.visibility * Gen.C.CELL_M)} m`, 'lamp reach'),
     ]).join('');
     const box = $('brief-map');
     box.innerHTML = '';
@@ -101,12 +110,15 @@
           ? 'You carry this survey: press M in the water to check it. It shows the passages, not the way through, and reading it costs time.'
           : 'Study the survey now. It stays at the entrance: once you leave the pool, you have your line, your lamp and your memory.';
     }
-    $('brief-note').textContent += ` Generated in ${current.genMs} ms${d.attempts > 1 ? `, after ${d.attempts - 1} rejected ${d.attempts === 2 ? 'cave' : 'caves'} (${d.rejected.join('; ')})` : ', passed the fairness check first time'}.`;
+    if (current.board) $('brief-note').textContent += ' Everyone dives this same maze today. Tag the end chamber and get home to go on the board, ranked by gas left.';
+    $('brief-gen').textContent = `Generated in ${current.genMs} ms${d.attempts > 1 ? `, after ${d.attempts - 1} rejected ${d.attempts === 2 ? 'cave' : 'caves'} (${d.rejected.join('; ')})` : '. It passed the fairness check first time'}.`;
     show('brief');
   }
 
   function descend() {
     game = new Game(current.dive, current.mapMode);
+    current.startedAt = new Date().toISOString();
+    pendingReel = false;
     renderer.setDive(game);
     ui.showMap = false;
     ui.showHelp = true;
@@ -124,18 +136,25 @@
     $('result-headline').textContent = pm.headline;
     $('result-stats').innerHTML = [
       fact(pm.stats.time, 'dive time'),
-      fact(`${pm.stats.maxPen} m`, 'furthest from the entrance'),
       fact(`${pm.stats.gas} bar`, 'gas left'),
-      fact(`${pm.stats.zeroVis} s`, 'in zero visibility'),
+      fact(`${pm.stats.maxPen} m`, 'furthest in'),
       fact(`${pm.stats.laid} m`, 'line laid'),
-      fact(`${res.deadEnds}`, 'dead ends found'),
+      fact(`${res.deadEnds}`, 'dead ends'),
+      fact(`${pm.stats.zeroVis} s`, 'zero visibility'),
       fact(pm.stats.score, 'score'),
     ].join('');
     $('result-notes').innerHTML = pm.notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('');
-    $('result-notes-title').hidden = !pm.notes.length;
+    $('result-notes-box').hidden = !pm.notes.length;
+    $('result-cols').classList.toggle('single', !pm.notes.length);
     $('result-log').innerHTML = pm.timeline.map((e) => `<li><time>${e.t}</time><span>${escapeHtml(e.text)}</span></li>`).join('');
+    Telemetry.record(game, current);
+    Leaderboard.showBlock(game, current);
     let next = '';
-    if (res.outcome !== 'abort' && $('opt-level').value !== 'auto') {
+    if (res.outcome !== 'abort' && current.board) {
+      progress.dive += 1;
+      saveProgress();
+      next = 'The daily maze leaves your level where it is.';
+    } else if (res.outcome !== 'abort' && $('opt-level').value !== 'auto') {
       progress.dive += 1;
       saveProgress();
       next = `The level is set by hand to ${current.level} in the dive options.`;
@@ -163,7 +182,7 @@
     keys.add(e.code);
     if (mode === 'dive') {
       if (e.code === 'Escape' || e.code === 'KeyP') show('pause');
-      else if (e.code === 'KeyR') game.toggleReel();
+      else if (e.code === 'KeyR') pendingReel = true;   // applied on the next step, so it is recorded
       else if (e.code === 'KeyH') ui.showHelp = !ui.showHelp;
       else if (e.code === 'KeyM') {
         if (ui.showMap) ui.showMap = false;
@@ -171,6 +190,8 @@
         else game.toast(game.mapMode === 'none' ? 'There is no survey for this cave.' : 'The survey stayed at the entrance.');
       }
     } else if (mode === 'pause' && (e.code === 'Escape' || e.code === 'KeyP')) show(null);
+    // Enter on a focused button presses that button instead.
+    else if (e.code === 'Enter' && e.target.tagName === 'BUTTON') return;
     else if (mode === 'brief' && e.code === 'Enter') descend();
     else if (mode === 'result' && e.code === 'Enter') $('next').click();
     else if (mode === 'title' && e.code === 'Enter') planFromOptions();
@@ -186,20 +207,29 @@
   }
 
   // ------------------------------------------------------------------ buttons
-  $('start').onclick = planFromOptions;
+  $('start').onclick = () => planFromOptions();
+  $('daily').onclick = planDaily;
   $('descend').onclick = descend;
   $('brief-back').onclick = () => { updateTitle(); show('title'); };
   $('resume').onclick = () => show(null);
   $('end-dive').onclick = () => { game.abort(); showResult(); };
-  $('next').onclick = () => {
-    $('opt-seed').value = '';
-    const lv = $('opt-level').value, level = lv === 'auto' ? progress.level : Number(lv);
-    const mv = $('opt-map').value;
-    plan(CaveRNG.randomSeed(), level, mv === 'auto' ? autoMap(level) : mv);
-  };
-  $('replay').onclick = () => plan(current.seed, current.level, current.mapMode);
+  $('next').onclick = () => { $('opt-seed').value = ''; planFromOptions(''); };
+  $('replay').onclick = () => plan(current.seed, current.level, current.mapMode, current.board, current.choices);
   $('to-title').onclick = () => { updateTitle(); show('title'); };
   $('reset').onclick = () => { progress = { dive: 1, level: 0, history: [] }; saveProgress(); updateTitle(); };
+
+  // Telemetry: the first-run consent card, the Privacy screen, and abandoned dives.
+  const choose = (c) => () => { Telemetry.setConsent(c); updateTitle(); show('title'); };
+  $('consent-yes').onclick = choose('granted');
+  $('consent-no').onclick = choose('denied');
+  const openPrivacy = () => { Telemetry.fillPrivacy(); show('privacy'); };
+  $('privacy-open').onclick = openPrivacy;
+  $('privacy-toggle').onclick = () => { Telemetry.setConsent(Telemetry.settings.consent === 'granted' ? 'denied' : 'granted'); openPrivacy(); };
+  $('privacy-export').onclick = () => Telemetry.download();
+  $('privacy-clear').onclick = () => { Telemetry.clear(); openPrivacy(); };
+  $('privacy-back').onclick = () => show('title');
+  // Closing the tab mid-dive records it as abandoned (sent only with consent).
+  window.addEventListener('pagehide', () => { if (game && !game.done && current) Telemetry.record(game, current); });
 
   // ------------------------------------------------------------------ loop
   const STEP = 1 / 60;
@@ -210,7 +240,12 @@
     if (mode === 'dive' && game) {
       acc += dt;
       const input = readInput();
-      while (acc >= STEP && !game.done) { game.update(STEP, input); acc -= STEP; }
+      while (acc >= STEP && !game.done) {
+        input.reel = pendingReel;
+        pendingReel = false;
+        game.update(STEP, input);
+        acc -= STEP;
+      }
       if (game.t > 25 && !ui.helpHidden) { ui.helpHidden = true; ui.showHelp = false; }
       renderer.draw(dt, ui);
       if (game.done) { acc = 0; showResult(); }
@@ -221,9 +256,10 @@
   }
 
   updateTitle();
+  if (Telemetry.needsConsent) { Telemetry.fillConsent(); show('consent'); }
   loadArt('resources/sprites', (art) => {
     renderer = new Renderer(canvas, art);
-    window.__cave = { get game() { return game; }, get renderer() { return renderer; }, plan, descend };
+    window.__cave = { get game() { return game; }, get renderer() { return renderer; }, get current() { return current; }, plan, planDaily, descend };
     requestAnimationFrame(frame);
   });
 })();
