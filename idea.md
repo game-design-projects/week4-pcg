@@ -44,9 +44,13 @@ The player is a solo cave diver in a generated, flooded cave. They follow a guid
 
 ## Art
 
-- Art concept first, using ChatGPT image generation, then sprite sheets: the diver, cave tiles and props, guideline pieces, silt and light effects.
-- Direction so far: 2D, flat-shaded indie style with soft gradients; deep teal, ink blue and slate grey, with warm amber reserved for the guideline, its markers and the headlamp; a narrow light cone, drifting silt, no visible surface above.
-- Generated sprite grids are not pixel-aligned, so frames will need cutting and aligning in an editor. Tiles are not guaranteed to tile seamlessly.
+- Art concept first, using ChatGPT image generation, then sprite sheets. These now exist in `resources/`:
+  - `cave_concept_1.png`: side-view scene (diver, guideline, lamp cone, silt).
+  - `cave_concept_2.png`: top-down survey-style map (depth bands, guideline with markers, dashed jump, faint unexplored outlines).
+  - `cave_sprite.png`: diver sprite sheet.
+  - `cave_sprite2.png`: tiles, props, guideline pieces, silt and light effects, bubbles.
+- Direction: deep teal, ink blue and slate grey, with warm amber reserved for the guideline, its markers and the headlamp; a narrow light cone, drifting silt, no visible surface above.
+- The generated sprite grids are not pixel-aligned (frame spacing is uneven), so frames will need cutting and aligning in an editor. Whether the tiles join seamlessly has not been checked.
 
 ## Checking generated dives
 

@@ -42,7 +42,12 @@ What is not procedural: the rules, the art, and the text templates are hand-made
 
 ## Art
 
-The art concept and sprite sheets are made first with ChatGPT image generation and kept separate from the game code, in `resources/`. The direction so far is 2D, flat-shaded, in teal, ink blue and slate grey, with amber reserved for the guideline and the diver's lamp.
+The art concept and sprite sheets were made first with ChatGPT image generation and are kept separate from the game code, in `resources/`. The direction is 2D, in teal, ink blue and slate grey, with amber reserved for the guideline and the diver's lamp.
+
+- `resources/cave_concept_1.png`: side-view scene of the diver following the guideline, with a narrow lamp cone and silt behind.
+- `resources/cave_concept_2.png`: top-down survey-style map with depth bands, a guideline with markers, a dashed jump between lines, and faint outlines of unexplored areas.
+- `resources/cave_sprite.png`: diver sprite sheet (idle, swim, up and down, squeeze, reach and clip, stirring silt).
+- `resources/cave_sprite2.png`: cave tiles, rock and stalactite props, guideline pieces, silt puff frames, lamp cones and bubbles.
 
 ## How to run
 
