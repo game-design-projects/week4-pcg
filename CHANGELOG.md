@@ -4,6 +4,65 @@ What changed in Late, and why. Versions after 0.1 come from the improvement loop
 generated days through the solver and the autopilot (`node tools/sweep.js`), look for days that
 are trivial, unfair or dull, change the generator or the rules, and measure again.
 
+## 0.4.1 — UI pass from playtesting: English first, bundled fonts, no overlapping text
+
+Second round of playtest feedback on the pull request: some text overlapped other text or elements (HUD panels,
+signs, boards), the interface should be mainly English, and there should be no missing-font fallback.
+
+**Finding the overlaps: `tools/ui-audit.mjs`.** Looking at screenshots does not scale, so the audit measures.
+- It plays through the game in Chromium at seven window sizes, from 800×600 and a phone in landscape (844×390)
+  up to 2560×1080: Day 0 with the coach, a Monday with the route guide, a Thursday with a hub, trains, the phone
+  map, the timetable, help, pause, results, the shop and the week summary.
+- On the canvas it wraps the game's own text and panel helpers and records every piece of text drawn in each
+  frame. It reports text that overlaps text, text that a panel drawn later hides, and HUD text cut off at the edge.
+- It lays out the metro map at the briefing, result and phone sizes and checks the station labels.
+- In the HTML screens it measures every line of text for overlaps, clipping and cards whose top would be out
+  of reach.
+- The first run found 329 problems at 1280×720 alone; they came from about ten causes. Now: none at any of the
+  seven sizes.
+
+**What was wrong, and the fixes.**
+- The "Unpaid" wall label and the "Gates" label sat on the same line as the hanging signs. "Unpaid area" is now
+  painted on the floor and "Gates" sits below the signs.
+- Escalator direction lights were 70 px above the escalator mouth, on top of the signs on the concourse and the
+  departure boards on the platform. They are now small lights at the mouth.
+- Two wayfinding signs at decision points close together drew one over the other. A sign that would cover
+  another is now skipped.
+- Departure boards were drawn before the train on the far track and before the escalators, which covered them.
+  Boards now hang in front.
+- Stairs and escalators are drawn in two passes, bodies then labels, so no escalator can cut across another's
+  check, lift or timer label.
+- Trains slid in and out over the neighbouring passage in hubs, covering its one-way plaque. They are now clipped
+  to their platform, as if coming out of the tunnel.
+- The one-way plaque hung at head height, where people walking past covered it. It is now painted on the floor.
+- The level labels (G, B1…) slid under the clock panel when the street row was near the top.
+- On trains, the carriage diagram covered the car labels; it now sits between the line strip and the cars. Long
+  station names on the line strip ran into each other; each now gets the room up to its neighbours, with "…".
+- On the metro map, labels collided on busier networks. Labels now also avoid other stations' markers, drop
+  the Chinese line when crowded, and leave a minor station unlabelled rather than cover another label.
+- Long destinations in the briefing timetable were cut off with "…"; they now wrap.
+
+**English first.** Every Chinese string is now English or comes after an English label:
+- Station names read "Qingshui Railway Station 清水火车站" on the HUD, map labels, boards, platform walls,
+  train windows and the ticker.
+- Chinese-only text is gone: the train-front "终点" (now END), the lift "电梯/开" (LIFT/OPEN), the exit tag
+  "出口B" (Exit B, with 出口 below), the stale-sign mark "旧" (old), "进站" (Now), and two excuse lines.
+- Help no longer relies on 单向通行 and 安检.
+- Chinese stays as flavour where it helps the setting: station names, "One way ← 单向通行", "ON TIME 准时",
+  weekday tags ("Thu 周四") and the logo.
+
+**No font fallback.** The game used to ask Google Fonts for one font and leave everything else, Chinese included,
+to whatever the player's system had. Chinese could show as empty boxes, and text measured differently on every
+machine. All fonts are now bundled in `assets/fonts` (152 KB, SIL Open Font License, licences included):
+- Inter for the interface
+- Pixelify Sans for the clock
+- a subset of Noto Sans SC with every Chinese character the game can draw, including every syllable the
+  station-name generator uses (212 characters)
+
+`tools/build_fonts.py` rebuilds the fonts from the text in the code and fails if any character is not covered.
+A test fails if the code ever uses a character outside the bundled set, or an emoji; the five emoji in the UI
+became text. The page now makes no network requests at all, and the headless playtest checks that.
+
 ## 0.4.0 — playtest feedback: a tutorial day and a route guide for Monday
 
 From playtesting (feedback on the pull request): **there was nothing to teach the controls**, and **the first day

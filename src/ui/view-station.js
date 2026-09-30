@@ -168,15 +168,17 @@
       }
     } else if (seg.flow === 'one-way') {
       for (let xx = Math.ceil(x0 / 60) * 60 + 30; xx < x1 - 10; xx += 60) G.arrowGlyph(ctx, seg.dir > 0 ? 'right' : 'left', xx, row.feet - 4, 16, 'rgba(255,200,60,0.7)');
-      // one-way plaque
+      // one-way marking painted on the floor, where the crowd cannot stand in front of it
       const px = (x0 + x1) / 2;
       if (px > cam.x - 100 && px < cam.x + cam.w + 100) {
-        G.roundRect(ctx, px - 58, row.y + 48, 116, 22, 4, '#b8321f');
-        G.text(ctx, `单向通行 One way ${seg.dir > 0 ? '→' : '←'}`, px, row.y + 64, { size: 12, weight: 700, align: 'center' });
+        const label = `One way ${seg.dir > 0 ? '→' : '←'}  单向通行`;
+        const pw = G.measure(ctx, label, 10, 800) + 16;
+        G.roundRect(ctx, px - pw / 2, row.feet + 4, pw, 14, 3, '#b8321f');
+        G.text(ctx, label, px, row.feet + 15, { size: 10, weight: 800, align: 'center' });
       }
     }
     if (seg.kind === 'unpaid') {
-      G.text(ctx, '非付费区 Unpaid', x0 + 6, row.y + 34, { size: 10, color: 'rgba(255,255,255,0.35)' });
+      G.text(ctx, 'Unpaid area', x0 + 8, row.feet + 15, { size: 10, weight: 700, color: 'rgba(255,255,255,0.4)' });
     }
   }
 
@@ -211,8 +213,9 @@
     for (const xx of [x0 + 110, x1 - 110]) {
       if (xx < cam.x - 150 || xx > cam.x + cam.w + 150) continue;
       G.roundRect(ctx, xx - 70, row.y + 46, 140, 34, 3, '#1c2129');
-      G.text(ctx, v.station.name.zh, xx, row.y + 63, { size: 14, weight: 700, align: 'center', family: 'cjk' });
-      G.text(ctx, v.station.name.en, xx, row.y + 76, { size: 10, weight: 600, align: 'center', color: '#c9d1dc' });
+      const nm = G.fit(ctx, v.station.name.en, 128, 14, 700);
+      G.text(ctx, nm.str, xx, row.y + 63, { size: nm.size, weight: 700, align: 'center', backdrop: true });
+      G.text(ctx, v.station.name.zh, xx, row.y + 76, { size: 10, weight: 600, align: 'center', color: '#c9d1dc', backdrop: true });
     }
     // far track bed
     ctx.fillStyle = '#23262c';
@@ -324,7 +327,7 @@
     // destination board on the front car
     const front = dir === 0 ? bx + len - 70 : bx + 10;
     G.roundRect(ctx, front, yTop - 1, 60, 12, 2, '#0e1116');
-    G.text(ctx, `${line.num} ${st.terminus ? '终点' : '▶'}`, front + 30, yTop + 9, { size: 9, weight: 700, align: 'center', color: '#ffb547', family: 'pixel' });
+    G.text(ctx, `${line.num} ${st.terminus ? 'END' : '▶'}`, front + 30, yTop + 9, { size: 9, weight: 700, align: 'center', color: '#ffb547', family: 'pixel' });
   }
 
   function drawTrainsForPlatform(ctx, v, lay, row, p, which) {
@@ -336,7 +339,18 @@
     if (!st) return;
     const line = v.lines.get(tr.line);
     const yTop = which === 'far' ? row.y + 40 : row.y + 146;
+    // trains come out of the tunnel at the platform ends: never draw one over a neighbouring passage
+    const seg = v.I.segs[p.seg];
+    const cx0 = X(lay, seg.x0);
+    const cx1 = X(lay, seg.x1);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(cx0, yTop - 30, cx1 - cx0, 130);
+    ctx.clip();
+    ctx.__clipRect = [cx0, yTop - 30, cx1, yTop + 100]; // read by tools/ui-audit.mjs
     drawTrain(ctx, v, lay, X(lay, p.trainX0), yTop, line, tr.dir, st, which === 'near');
+    ctx.__clipRect = null;
+    ctx.restore();
   }
 
   // ------------------------------------------------------------------ links
@@ -347,12 +361,27 @@
     return { ax: X(lay, L.a.x), ay: feetY(lay, a, 0), bx: X(lay, L.b.x), by: feetY(lay, b, 0) };
   }
 
-  function drawVLink(ctx, v, lay, L) {
+  /**
+   * Stairs, escalators and lifts. Drawn in two passes so that no escalator
+   * body can cover another one's labels: pass 'body' for the structures,
+   * pass 'labels' for lights, timers, checks and exit canopies.
+   */
+  function drawVLink(ctx, v, lay, L, pass) {
+    const body = pass !== 'labels';
+    const labels = pass !== 'body';
     const { ax, ay, bx, by } = linkEnds(v, lay, L);
     if (Math.max(ax, bx) < v.cam.x - 60 || Math.min(ax, bx) > v.cam.x + v.cam.w + 60) return;
     if (Math.max(ay, by) < v.cam.y - 40 || Math.min(ay, by) > v.cam.y + v.cam.h + 40) return;
     const closed = L.closedUntil && v.t < L.closedUntil;
     if (L.kind === 'lift') {
+      if (labels) {
+        for (const [yy, end] of [[ay, 'a'], [by, 'b']]) {
+          const open = liftOpenAt(L.lift, end, v.t);
+          G.roundRect(ctx, ax - 22, yy - 70, 44, 12, 2, '#11151b');
+          G.text(ctx, open ? '▲▼ OPEN' : 'LIFT', ax, yy - 61, { size: 9, weight: 700, align: 'center', color: open ? '#7ee08a' : '#c8ced6' });
+        }
+      }
+      if (!body) return;
       const top = ay - 64;
       ctx.fillStyle = 'rgba(40,46,56,0.95)';
       ctx.fillRect(ax - 16, top, 32, by - top);
@@ -372,13 +401,13 @@
       G.roundRect(ctx, ax - 14, cy - 58, 28, 56, 3, '#9aa3ae', '#d7dde4');
       ctx.fillStyle = '#5c6570';
       ctx.fillRect(ax - 1, cy - 56, 2, 52);
-      for (const [yy, end] of [[ay, 'a'], [by, 'b']]) {
-        const open = liftOpenAt(L.lift, end, v.t);
-        G.roundRect(ctx, ax - 22, yy - 70, 44, 12, 2, '#11151b');
-        G.text(ctx, open ? '▲▼ 开' : '电梯', ax, yy - 61, { size: 9, weight: 700, align: 'center', color: open ? '#7ee08a' : '#c8ced6', family: 'cjk' });
-      }
       return;
     }
+    if (body) drawVLinkBody(ctx, v, L, ax, ay, bx, by, closed);
+    if (labels) drawVLinkLabels(ctx, v, L, ax, ay, bx, by, closed);
+  }
+
+  function drawVLinkBody(ctx, v, L, ax, ay, bx, by, closed) {
     const w = 20;
     const dx = bx - ax;
     const dy = by - ay;
@@ -415,26 +444,6 @@
     }
     ctx.stroke();
     ctx.restore();
-    if (L.kind === 'escalator') {
-      // handrail + direction lights at both ends
-      const dirNow = escalatorDir(L.esc, v.t); // +1 runs down (a→b)
-      const upperOk = dirNow === 1; // can enter at the top
-      for (const [px, py, ok, arrow] of [
-        [ax, ay, upperOk, 'down'],
-        [bx, by, !upperOk, 'up'],
-      ]) {
-        G.roundRect(ctx, px - 9, py - 70, 18, 16, 3, ok ? '#1f7a44' : '#8b2525');
-        if (ok) G.arrowGlyph(ctx, arrow, px, py - 62, 11, '#e9fff1');
-        else G.text(ctx, '✕', px, py - 57, { size: 11, weight: 800, align: 'center' });
-      }
-      if (L.esc.period && v.policy.escalatorTimers) {
-        const next = escalatorReady(L.esc, -dirNow, v.t) - v.t;
-        const mx = (ax + bx) / 2;
-        const my = (ay + by) / 2 - 30;
-        G.roundRect(ctx, mx - 22, my - 10, 44, 14, 3, 'rgba(10,12,16,0.8)');
-        G.text(ctx, `⟲ ${Math.floor(next / 60)}:${String(Math.floor(next % 60)).padStart(2, '0')}`, mx, my + 1, { size: 10, weight: 700, align: 'center', color: '#ffd166', family: 'pixel' });
-      }
-    }
     if (closed) {
       const mx = (ax + bx) / 2;
       const my = (ay + by) / 2;
@@ -445,22 +454,52 @@
         ctx.fillRect(i * 8 - 4, -8, 8, 16);
       }
       ctx.restore();
-      G.text(ctx, '停用 Closed', mx, my - 18, { size: 10, weight: 800, align: 'center', color: '#ffcf33', stroke: '#000', strokeWidth: 3 });
+    }
+  }
+
+  function drawVLinkLabels(ctx, v, L, ax, ay, bx, by, closed) {
+    if (L.kind === 'escalator') {
+      // handrail + direction lights at both ends
+      const dirNow = escalatorDir(L.esc, v.t); // +1 runs down (a→b)
+      const upperOk = dirNow === 1; // can enter at the top
+      for (const [px, py, ok, arrow] of [
+        [ax, ay, upperOk, 'down'],
+        [bx, by, !upperOk, 'up'],
+      ]) {
+        // a small light at the mouth of the escalator, below the signs and boards
+        const lx = px + (px === ax ? -1 : 1) * Math.sign(bx - ax || 1) * 16;
+        G.roundRect(ctx, lx - 8, py - 44, 16, 14, 3, ok ? '#1f7a44' : '#8b2525');
+        if (ok) G.arrowGlyph(ctx, arrow, lx, py - 37, 10, '#e9fff1');
+        else G.text(ctx, '×', lx, py - 33, { size: 11, weight: 800, align: 'center' });
+      }
+      if (L.esc.period && v.policy.escalatorTimers) {
+        const next = escalatorReady(L.esc, -dirNow, v.t) - v.t;
+        const mx = (ax + bx) / 2;
+        const my = (ay + by) / 2 - 30;
+        G.roundRect(ctx, mx - 22, my - 10, 44, 14, 3, 'rgba(10,12,16,0.8)');
+        G.text(ctx, `↻ ${Math.floor(next / 60)}:${String(Math.floor(next % 60)).padStart(2, '0')}`, mx, my + 1, { size: 10, weight: 700, align: 'center', color: '#ffd166', family: 'pixel' });
+      }
+    }
+    if (closed) {
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      G.text(ctx, 'Closed', mx, my - 18, { size: 10, weight: 800, align: 'center', color: '#ffcf33', stroke: '#000', strokeWidth: 3 });
     }
     if (L.check) {
       // transfer ID check at the end you start from
       const [cx, cy] = L.check.dir === 1 ? [ax, ay] : [bx, by];
       const side = (L.check.dir === 1 ? bx - ax : ax - bx) > 0 ? -1 : 1;
       G.sprite(ctx, 'guard_f', cx + side * 26, cy, { scale: 0.5 });
-      G.roundRect(ctx, cx - 50, cy - 92, 100, 18, 3, '#b3261e');
-      G.text(ctx, `查验 ${L.check.label}`, cx, cy - 79, { size: 10, weight: 800, align: 'center', family: 'cjk' });
+      const cw = G.measure(ctx, L.check.label, 10, 800) + 16;
+      G.roundRect(ctx, cx - cw / 2, cy - 92, cw, 18, 3, '#b3261e');
+      G.text(ctx, L.check.label, cx, cy - 79, { size: 10, weight: 800, align: 'center' });
       for (let i = 0; i < 3; i++) G.sprite(ctx, i % 2 ? 'sil_1' : 'sil_3', cx + side * (44 + i * 12), cy - 2, { scale: 0.7, alpha: 0.85 });
     }
     if (L.exit) {
       // street entrance canopy with the exit letter
       G.roundRect(ctx, ax - 22, ay - 64, 44, 30, 4, '#1d6b3c', '#0f3d22', 2);
-      G.text(ctx, `出口${L.exitLetter}`, ax, ay - 50, { size: 11, weight: 800, align: 'center', family: 'cjk' });
-      G.text(ctx, `Exit ${L.exitLetter}`, ax, ay - 38, { size: 9, weight: 700, align: 'center', color: '#c9f3d9' });
+      G.text(ctx, `Exit ${L.exitLetter}`, ax, ay - 50, { size: 11, weight: 800, align: 'center' });
+      G.text(ctx, `出口 ${L.exitLetter}`, ax, ay - 38, { size: 9, weight: 700, align: 'center', color: '#c9f3d9' });
     }
   }
 
@@ -481,8 +520,8 @@
         ctx.fillStyle = i === 0 ? '#39d98a' : '#39d98a';
         ctx.fillRect(gx - 1, row.feet - 24, 3, 2);
       }
-      G.roundRect(ctx, px - 30, row.y + 22, 60, 16, 3, '#12161c');
-      G.text(ctx, '检票 Gates', px, row.y + 34, { size: 9, weight: 700, align: 'center', color: '#dfe6ee', family: 'cjk' });
+      G.roundRect(ctx, px - 24, row.y + 50, 48, 15, 3, '#12161c');
+      G.text(ctx, 'Gates', px, row.y + 61, { size: 9, weight: 700, align: 'center', color: '#dfe6ee' });
     } else {
       // passage mouth / joint
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
@@ -493,7 +532,7 @@
       G.sprite(ctx, 'cp_scanner', px + side * 4, row.feet + 2, { scale: 0.34 });
       G.sprite(ctx, 'guard_f', px - side * 22, row.feet, { scale: 0.52 });
       G.roundRect(ctx, px - 46, row.y + 40, 92, 18, 3, '#b3261e');
-      G.text(ctx, `${L.check.label === 'ID check' ? '查验' : '安检'} ${L.check.label}`, px, row.y + 53, { size: 10, weight: 800, align: 'center', family: 'cjk' });
+      G.text(ctx, L.check.label, px, row.y + 53, { size: 10, weight: 800, align: 'center' });
       // a small standing queue
       for (let i = 0; i < 4; i++) {
         const qx = px + side * (26 + i * 13);
@@ -512,7 +551,7 @@
       ctx.restore();
       G.sprite(ctx, 'prop_cone', px + 26, row.feet, { scale: 0.45 });
       G.roundRect(ctx, px - 50, row.y + 40, 100, 18, 3, '#e0a100');
-      G.text(ctx, '施工 Closed for works', px, row.y + 53, { size: 10, weight: 800, align: 'center', color: '#1a1a1a', family: 'cjk' });
+      G.text(ctx, 'Closed for works', px, row.y + 53, { size: 10, weight: 800, align: 'center', color: '#1a1a1a' });
     }
   }
 
@@ -520,6 +559,7 @@
 
   function drawSigns(ctx, v, lay) {
     if (!v.signs) return;
+    const placed = [];
     for (const s of v.signs) {
       const seg = v.I.segs[s.seg];
       const row = lay.rows[seg.depth];
@@ -539,6 +579,9 @@
       const w = items.length * 44 + 8;
       const sy = seg.kind === 'platform' ? row.y + 20 : row.y + 20;
       const sx = px - w / 2;
+      // two decision points close together: keep the first sign, drop the one that would cover it
+      if (placed.some((p) => p.y === sy && sx < p.x1 + 6 && sx + w > p.x0 - 6)) continue;
+      placed.push({ x0: sx, x1: sx + w, y: sy });
       ctx.fillStyle = '#50565f';
       ctx.fillRect(px - w / 2 + 6, row.y, 2, sy - row.y);
       ctx.fillRect(px + w / 2 - 8, row.y, 2, sy - row.y);
@@ -562,7 +605,7 @@
         }
         G.arrowGlyph(ctx, arrow, cx + 30, sy + 11, 12, '#ffffff');
       });
-      if (state === 'stale') G.text(ctx, '旧', sx + w - 6, sy + 8, { size: 8, weight: 800, align: 'right', color: '#c8a15a', family: 'cjk' });
+      if (state === 'stale') G.text(ctx, 'old', sx + w - 4, sy + 8, { size: 7, weight: 800, align: 'right', color: '#c8a15a' });
     }
   }
 
@@ -616,7 +659,8 @@
       ctx.beginPath();
       ctx.ellipse(tx, fy + 6, r * 1.6, r * 0.45, 0, 0, Math.PI * 2);
       ctx.stroke();
-      if (Math.abs(tx - px) > 30) bounceArrow(ctx, tx, fy - 78, 'down', v.clock);
+      // (not on a platform: the departure boards hang at that height)
+      if (Math.abs(tx - px) > 30 && seg.kind !== 'platform') bounceArrow(ctx, tx, fy - 78, 'down', v.clock);
     }
     if (g.kind === 'link' && !g.dir) {
       const Lk = v.I.links[g.link];
@@ -664,14 +708,15 @@
         const by = row.y + 50;
         G.roundRect(ctx, bx - 86, by, 172, 40, 4, '#0b0e12', '#2e3540', 2);
         G.badge(ctx, line, bx - 72, by + 12, 8);
-        G.text(ctx, `${which === 'far' ? '↑' : '↓'} ${termName.zh} ${termName.en}`, bx - 60, by + 16, { size: 10, weight: 700, color: '#ffd9a0', family: 'cjk' });
+        const dest = G.fit(ctx, [`${which === 'far' ? '↑' : '↓'} ${termName.en}  ${termName.zh}`, `${which === 'far' ? '↑' : '↓'} ${termName.en}`], 140, 10, 700);
+        G.text(ctx, dest.str, bx - 60, by + 16, { size: dest.size, weight: 700, color: '#ffd9a0' });
         if (!working) {
           const flicker = Math.floor(v.t * 2) % 7 === 0;
-          G.text(ctx, flicker ? '' : '暂停服务 Out of service', bx, by + 33, { size: 10, weight: 700, align: 'center', color: '#ff5b4d', family: 'cjk' });
+          G.text(ctx, flicker ? '' : 'Out of service', bx, by + 33, { size: 10, weight: 700, align: 'center', color: '#ff5b4d' });
           continue;
         }
         if (k === service.stops.length - 1) {
-          G.text(ctx, '终点站 Terminus — do not board', bx, by + 33, { size: 10, weight: 700, align: 'center', color: '#ffb547' });
+          G.text(ctx, 'Terminus: do not board', bx, by + 33, { size: 10, weight: 700, align: 'center', color: '#ffb547' });
           continue;
         }
         const j = TT.nextTrip(service, k, v.t);
@@ -679,7 +724,7 @@
         for (let q = 0; q < 2 && j >= 0 && j + q < service.deps.length; q++) {
           const dep = TT.depAt(service, j + q, k);
           const arr = TT.arrAt(service, j + q, k);
-          mins.push(v.t >= arr ? '进站 Now' : `${Math.max(0, Math.ceil((arr - v.t) / 60))} min`);
+          mins.push(v.t >= arr ? 'Now' : `${Math.max(0, Math.ceil((arr - v.t) / 60))} min`);
         }
         G.text(ctx, mins.join('   ·   '), bx, by + 33, { size: 12, weight: 700, align: 'center', color: '#ffb547', family: 'pixel' });
       }
@@ -709,7 +754,7 @@
       }
       ctx.fillStyle = '#2b1f16';
       ctx.fillRect(px - 10, row.y + 100, 20, 28);
-      G.text(ctx, '家 Home', px, row.y + 36, { size: 12, weight: 800, align: 'center', family: 'cjk', stroke: '#1b1b1b' });
+      G.text(ctx, 'Home', px, row.y + 36, { size: 12, weight: 800, align: 'center', stroke: '#1b1b1b' });
     }
     if (d.office.station === v.station.id) {
       const px = X(lay, d.office.x);
@@ -728,7 +773,7 @@
       ctx.fillStyle = '#1d2733';
       ctx.fillRect(px - 14, row.y + 98, 28, 30);
       G.roundRect(ctx, px - 46, row.y - 48, 92, 18, 3, '#1f2630');
-      G.text(ctx, '打卡科技 Daka Tech', px, row.y - 35, { size: 10, weight: 800, align: 'center', family: 'cjk', color: '#ffd166' });
+      G.text(ctx, 'Daka Tech', px, row.y - 35, { size: 10, weight: 800, align: 'center', color: '#ffd166' });
       G.sprite(ctx, 'map_office', px, row.y + 94, { scale: 0.5 });
     }
   }
@@ -920,7 +965,7 @@
       ctx.fill();
     }
     if (v.day.office.station === v.station.id) {
-      G.text(ctx, '💼', ox + X(lay, v.day.office.x) * sx, oy + lay.rows[0].feet * sy - 2, { size: 11, align: 'center' });
+      G.sprite(ctx, 'map_office', ox + X(lay, v.day.office.x) * sx, oy + lay.rows[0].feet * sy, { scale: 0.26 });
     }
   }
 
@@ -946,14 +991,15 @@
       }
     }
     drawProps(ctx, v, lay);
-    drawBoards(ctx, v, lay);
     for (const p of v.I.platforms) {
       const row = lay.rows[v.I.segs[p.seg].depth];
       if (row.y > cam.y + cam.h + 20 || row.y + row.h < cam.y - 20) continue;
       drawTrainsForPlatform(ctx, v, lay, row, p, 'far');
     }
-    for (const Lk of v.I.links) if (Lk.axis === 'v') drawVLink(ctx, v, lay, Lk);
+    for (const Lk of v.I.links) if (Lk.axis === 'v') drawVLink(ctx, v, lay, Lk, 'body');
+    drawBoards(ctx, v, lay); // the boards hang over the platform: in front of the far train and the stairs
     drawStreetDoors(ctx, v, lay);
+    for (const Lk of v.I.links) if (Lk.axis === 'v') drawVLink(ctx, v, lay, Lk, 'labels');
     drawSigns(ctx, v, lay);
     for (const Lk of v.I.links) if (Lk.axis === 'h') drawHLink(ctx, v, lay, Lk);
     drawGuide(ctx, v, lay);
@@ -972,7 +1018,7 @@
     // level labels, screen-fixed on the left
     for (const row of lay.rows) {
       const sy = row.feet - cam.y;
-      if (sy < 40 || sy > cam.h + 20 || row.kind === 'empty') continue;
+      if (sy < 176 || sy > cam.h + 20 || row.kind === 'empty') continue; // above that it would sit under the clock panel
       const label = row.depth === 0 ? 'G' : `B${row.depth}`;
       const segs = row.segs.filter((s) => s.kind === 'platform');
       const lines = [...new Set(segs.flatMap((s) => {

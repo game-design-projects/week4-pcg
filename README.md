@@ -42,11 +42,13 @@ A run is a five-day work week, after an optional **Day 0**: a guided first day o
 
 ## How to run
 
-- **Play:** open `index.html` in a browser. Double-clicking it works: the scripts are plain `<script>` files, with no build step, no dependencies and no network needed (the pixel font comes from Google Fonts when you are online; otherwise the page falls back to a system font).
+- **Play:** open `index.html` in a browser. Double-clicking it works: the scripts are plain `<script>` files, with no build step, no dependencies and no network requests at all. The fonts are bundled in `assets/fonts`: Inter, Pixelify Sans and a subset of Noto Sans SC holding every Chinese character the game can show. The interface is in English, with Chinese station names and a few signs as flavour next to the English. Any window from 800×600 up to ultrawide works; a phone in landscape works too, but the text is small.
   - Controls: ← → walk · ↑ board the train behind the platform, go up, move to the far lane · ↓ board the train in front, go down, move to the near lane · ↑ or E get off at a stop · hold Space to let time pass · M phone map · T timetable · Esc pause. Touch screens get on-screen buttons.
   - Modes on the title screen: **Day 0** (the tutorial, offered first to a new player), **a work week** (Monday to Friday, with the Director adjusting each day), **the daily commute** (the same city for everyone that day) and **play a seed** (any seed and weekday; also works as a link, e.g. `index.html?seed=K7Q2-M4XP&wd=3`, where `wd` is 0 for Monday to 4 for Friday).
-- **Tests:** `node --test` (Node 20 or newer). 49 tests: seed determinism, the winnable check, the corridor rules, the generator's output, the route guide and Day 0, and the leaderboard Worker. The Worker tests need `node:sqlite` (Node 22.13 or newer) and are skipped on older versions.
+- **Tests:** `node --test` (Node 20 or newer). 51 tests: seed determinism, the winnable check, the corridor rules, the generator's output, the route guide and Day 0, font coverage, and the leaderboard Worker. The Worker tests need `node:sqlite` (Node 22.13 or newer) and are skipped on older versions.
 - **Headless playthrough:** `node tools/playtest.mjs` opens `index.html` from disk in Chromium and plays Monday through the game's real keyboard handler, with the autopilot choosing the keys. `--week` plays Monday to Friday with the shop in between, `--late` dawdles past 09:00 and expects a LATE result, `--daily` plays the daily commute, `--tutorial` plays Day 0 as a new player (doing what the coach asks) and then Monday, both by following only the on-screen guide, and `--shots DIR` saves a screenshot of every phase. Needs Playwright.
+- **UI audit:** `node tools/ui-audit.mjs` plays through every screen in Chromium at seven window sizes (from 800×600 and 844×390 up to 2560×1080). It reports any text that overlaps other text, is hidden under a panel, or is cut off: on the canvas it records every piece of text the game draws, and in the HTML screens it measures every line. `--sizes 1280x720` audits one size, `--shots DIR` keeps the screenshots. Needs Playwright.
+- **Fonts:** `python3 tools/build_fonts.py` rebuilds the bundled font subsets from the text in the code (needs network and fonttools). Run it after adding text with new characters; a test fails until you do.
 - **Sweep:** `node tools/sweep.js --n 40` generates 40 days per weekday, solves and plays each one, and prints the report the improvement loop is built on (`--out FILE.md` saves it).
 - **Sprites:** `python3 tools/extract_sprites.py` rebuilds `assets/sprites.png` and `src/ui/atlas.js` from the team's sheet in `resources/sprite.png` (needs Pillow).
 
@@ -134,7 +136,7 @@ After the first playable version (0.1) we measured before adding anything. `tool
 | attempts per Friday day | 1.8 | 2.5 | 1.5 |
 | Friday generation time (median) | 24 ms | 111 ms | 100 ms |
 
-**Then playtesting (0.4).** People who tried it said there was nothing to teach the controls and that the first day was too hard: new players got lost on Monday. So 0.4 adds Day 0 and the route guide, which fades from the whole path on Monday to lit signs on Tuesday to nothing. A hesitant player (10 s at every stair or gate) who does only what the guide says is on time on all 40 Monday and all 40 Tuesday sweep days. Building it also turned up a bug that made the timetable impossible to close with T.
+**Then playtesting (0.4).** People who tried it said there was nothing to teach the controls and that the first day was too hard: new players got lost on Monday. So 0.4 adds Day 0 and the route guide, which fades from the whole path on Monday to lit signs on Tuesday to nothing. A hesitant player (10 s at every stair or gate) who does only what the guide says is on time on all 40 Monday and all 40 Tuesday sweep days. Building it also turned up a bug that made the timetable impossible to close with T. A second round of feedback asked for English first, no overlapping text and no font fallback (0.4.1): the new UI audit found 329 overlaps at 1280×720, from about ten causes, and after the fixes finds none at seven window sizes.
 
 The sweep also exposed two rules bugs (the solver could plan a lane change where ↑ means "climb", and could put you in the far lane where the simulation puts you in the near one) and an exploit: the best route hopped off at a stop, walked along the platform and got back on the same train to change cars. The fix was a new rule rather than a patch: you can walk through the carriages. The two Friday days with a 6-second pinch point on the fastest route are a known, accepted case; a safer route remains, and the hesitant commuter is never late on them.
 
@@ -178,9 +180,10 @@ src/core/                the generator and everything that must agree with it (n
   guide.js                 the route guide: the next step from wherever you stand
 src/ui/                  canvas views, HUD, screens, input, audio, the Day 0 coach, telemetry and leaderboard clients
 assets/sprites.png       sprites cut from the team's sheet (resources/sprite.png)
+assets/fonts/            the bundled fonts (subsets of Inter, Pixelify Sans, Noto Sans SC) and their licences
 server/                  Cloudflare Worker + D1: telemetry collector and leaderboard
 test/                    node --test suites
-tools/                   headless playtest, sweep, sprite extraction
+tools/                   headless playtest, UI audit, sweep, font and sprite builders
 docs/sweeps/             the sweep report for each version
 docs/screenshots/        the screenshots in this README
 idea.md                  the requirements and the ideas we started from

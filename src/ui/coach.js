@@ -155,7 +155,7 @@
         const h = 50 + lines.length * 20;
         bottom = y + h + 8;
         G.roundRect(ctx, x, y, w, h, 10, 'rgba(11,13,17,0.92)', '#ffd166', 2);
-        G.text(ctx, `教练 COACH · ${c.done.size + 1}/${LESSONS.length}`, x + 14, y + 20, { size: 10, weight: 800, color: '#ffd166', family: 'cjk' });
+        G.text(ctx, `COACH · ${c.done.size + 1}/${LESSONS.length}`, x + 14, y + 20, { size: 10, weight: 800, color: '#ffd166' });
         G.text(ctx, l.title, x + w - 14, y + 20, { size: 12, weight: 800, align: 'right', color: '#ffe7a8' });
         lines.forEach((ln, i) => G.text(ctx, ln, x + 14, y + 44 + i * 20, { size: 14, weight: 600, color: '#eef1f5', family: 'cjk' }));
       }

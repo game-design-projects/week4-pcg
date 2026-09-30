@@ -33,7 +33,7 @@ const errors = [];
 const requests = [];
 page.on('request', (r) => {
   const u = r.url();
-  if (!u.startsWith('file:') && !u.startsWith('data:') && !/fonts\.(googleapis|gstatic)\.com/.test(u)) requests.push(u);
+  if (!u.startsWith('file:') && !u.startsWith('data:')) requests.push(u); // fonts are bundled: nothing may leave the page
 });
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 page.on('console', (m) => {

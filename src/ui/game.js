@@ -220,7 +220,7 @@
       switch (e.type) {
         case 'blocked':
           game.blockedFor = 0.4;
-          if (e.why === 'one-way') toast('单向通行 One way — not this way', '#b3261e', 1.2);
+          if (e.why === 'one-way') toast('One way: not this way', '#b3261e', 1.2);
           else if (e.why === 'escalator') toast('Escalator is running the other way', '#b3261e', 1.2);
           else if (e.why === 'closed') toast(e.text || 'Closed', '#9a6a00', 1.5);
           else if (e.why === 'no-door') toast('Walk to a door first ← →', '#9a6a00', 1.2);
@@ -239,11 +239,11 @@
           break;
         case 'board':
           A.board();
-          toast(`上车 On ${e.line.replace('L', 'Line ')}`, game.lines.get(e.line).color, 1.5);
+          toast(`On ${e.line.replace('L', 'Line ')}`, game.lines.get(e.line).color, 1.5);
           break;
         case 'alight':
           A.chime();
-          if (e.terminus) toast('终点站 Terminus — everybody off', '#6b3fa0', 2);
+          if (e.terminus) toast('Terminus: everybody off', '#6b3fa0', 2);
           break;
         case 'platform':
           snapCamera();
@@ -564,7 +564,7 @@
       return;
     }
     if (game.glances <= 0) {
-      toast('Phone is dead 🔋 — no map today', '#b3261e', 1.6);
+      toast('Phone is dead: no map today', '#b3261e', 1.6);
       return;
     }
     game.glances -= 1;
@@ -635,6 +635,7 @@
       H: game.H,
       officeIdx: day.network.stations.findIndex((x) => x.id === day.office.station),
     };
+    game.drawLayer = 'world'; // for tools/ui-audit.mjs: which layer is being drawn
     if (!alt && game.guide && game.screen === 'play') {
       game.nav = game.guide.update(s);
       v.guide = policy.guide === 'path' ? game.nav : null;
@@ -652,9 +653,11 @@
       v.cam.y = cam.y;
       const out = L.viewStation.render(ctx, v);
       v.playerPx = out.playerPx;
+      game.drawLayer = 'hud';
       if (withHud && policy.minimap) L.viewStation.drawMinimap(ctx, v, out.lay, { x: game.W - 250, y: 84, w: 236, h: 110 });
     }
     if (withHud) {
+      game.drawLayer = 'hud';
       v.toasts = game.toasts;
       v.wage = game.mode === 'week' ? game.week.wage : 0;
       v.glances = game.glances;
@@ -666,6 +669,7 @@
         game.coach.update();
         game.coach.render(ctx, v, game.frameDt);
       }
+      game.drawLayer = 'modal';
       if (v.phoneOpen) drawPhone(ctx, v);
     }
   }
@@ -677,7 +681,7 @@
     const y = 110;
     G.roundRect(ctx, x - 16, y - 34, w + 32, h + 62, 26, '#0c0f14', '#3a414d', 3);
     const left = game.phoneUntil - game.clock;
-    G.text(ctx, left > 1e8 ? '地铁通 Metro · map' : `地铁通 Metro · battery low — ${Math.ceil(left)} s`, x + 8, y - 12, { size: 13, weight: 700, color: left < 3 ? '#ff8a80' : '#c9d1dc', family: 'cjk' });
+    G.text(ctx, left > 1e8 ? 'Metro map' : `Metro map · battery low: ${Math.ceil(left)} s`, x + 8, y - 12, { size: 13, weight: 700, color: left < 3 ? '#ff8a80' : '#c9d1dc' });
     L.viewMap.drawMap(ctx, game.day, { x, y, w, h }, { labels: 'all', here: game.day.network.stations[game.sim.state.st].id, clock: game.clock });
   }
 
@@ -707,7 +711,15 @@
     root.requestAnimationFrame(frame);
   }
 
+  /** The canvas only uses a web font once it is loaded; ask for all of them up front. */
+  function loadFonts() {
+    if (!document.fonts || !document.fonts.load) return;
+    const faces = ['600 14px Inter', '800 14px Inter', 'italic 900 14px Inter', '700 14px "Pixelify Sans"', '600 14px "Noto Sans SC"', '800 14px "Noto Sans SC"'];
+    for (const f of faces) document.fonts.load(f, f.includes('Noto') ? '站东西' : 'Late 09:00').catch(() => {});
+  }
+
   function init() {
+    loadFonts();
     game.canvas = document.getElementById('game');
     game.ctx = game.canvas.getContext('2d');
     G.loadAtlas();

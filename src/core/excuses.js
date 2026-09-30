@@ -10,8 +10,8 @@
 })(typeof self !== 'undefined' ? self : this, function (RNG, R) {
   'use strict';
 
-  const OPENERS = ['Sorry boss,', 'So sorry,', 'Hi, quick one:', 'Morning! Bad news:', '老板不好意思,'];
-  const CLOSERS = ['On my way!', 'Almost there.', 'Will stay late to make up for it.', 'Coffee is on me.', '马上到!'];
+  const OPENERS = ['Sorry boss,', 'So sorry,', 'Hi, quick one:', 'Morning! Bad news:', 'So sorry, boss (不好意思),'];
+  const CLOSERS = ['On my way!', 'Almost there.', 'Will stay late to make up for it.', 'Coffee is on me.', 'Nearly there (马上到)!'];
 
   const TEMPLATES = {
     checkpoint: ['the {label} at {station} took {wait}. They checked my bag twice.', 'I queued {wait} at the {label} in {station}. I now know every tile on that floor.'],
@@ -28,8 +28,8 @@
   };
 
   const REPLIES = [
-    { upTo: 120, lines: ['ok.', 'Noted 👍', 'Fine, just come in quietly.'] },
-    { upTo: 600, lines: ['See me when you get in.', 'Again?', '📅 Meeting moved to 9:30. You are welcome.'] },
+    { upTo: 120, lines: ['ok.', 'Noted.', 'Fine, just come in quietly.'] },
+    { upTo: 600, lines: ['See me when you get in.', 'Again?', 'Meeting moved to 9:30. You are welcome.'] },
     { upTo: Infinity, lines: ['We need to talk.', 'Have you considered moving closer?', 'HR has been cc\'d.'] },
   ];
 

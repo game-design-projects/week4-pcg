@@ -1,6 +1,6 @@
 {
   "name": "late",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Late: a subway transfer maze with procedurally generated commutes. NYU Game Design Week 4 PCG prototype.",
   "scripts": {
@@ -8,6 +8,7 @@
     "playtest": "node tools/playtest.mjs",
     "playtest:week": "node tools/playtest.mjs --week",
     "playtest:tutorial": "node tools/playtest.mjs --tutorial",
+    "ui-audit": "node tools/ui-audit.mjs",
     "sweep": "node tools/sweep.js"
   },
   "engines": {

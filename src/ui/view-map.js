@@ -51,31 +51,61 @@
       return false;
     });
     const out = new Map();
-    const order = [...day.network.stations].sort((a, b) => b.lines.length - a.lines.length);
+    const stations = day.network.stations;
+    const important = new Set([day.home && day.home.station, day.office && day.office.station, day.network.hubId].filter(Boolean));
+    // the most important labels choose first
+    const order = [...stations].sort((a, b) => important.has(b.id) - important.has(a.id) || b.lines.length - a.lines.length);
+    // the home and office markers sit above their stations: keep labels off them
+    for (const id of [day.home && day.home.station, day.office && day.office.station]) {
+      const st = id && stations.find((x) => x.id === id);
+      if (!st) continue;
+      const [x, y] = fr.P(st.gx, st.gy);
+      boxes.push({ x: x - 12, y: y - 34, w: 24, h: 28 });
+    }
+    // every station's marker is out of bounds for every label but its own
+    const dots = stations.map((st) => {
+      const [x, y] = fr.P(st.gx, st.gy);
+      const r = st.lines.length > 1 ? 10 : 6;
+      return { id: st.id, x: x - r, y: y - r, w: 2 * r, h: 2 * r };
+    });
+    const hit = (r, b) => r.x < b.x + b.w && r.x + r.w > b.x && r.y < b.y + b.h && r.y + r.h > b.y;
+    const collides = (r, id) => boxes.some((b) => hit(r, b)) || dots.some((d) => d.id !== id && hit(r, d));
+    const outside = (r) => r.x < box.x || r.x + r.w > box.x + box.w || r.y < box.y || r.y + r.h > box.y + box.h;
     for (const st of order) {
       const [cx, cy] = fr.P(st.gx, st.gy);
-      const w = Math.max(G.measure(ctx, st.name.en, sizes, 600), G.measure(ctx, st.name.zh, sizes + 1, 700, 'cjk')) + 4;
-      const h = sizes * 2 + 4;
+      const wEn = G.measure(ctx, st.name.en, sizes + 1, 700) + 4;
+      const wZh = G.measure(ctx, st.name.zh, sizes - 1, 600) + 4;
       const r0 = st.lines.length > 1 ? 11 : 7;
-      const cands = [
-        [r0, -h / 2], [-r0 - w, -h / 2], [-w / 2, -r0 - h], [-w / 2, r0],
-        [r0 - 2, -h - 2], [r0 - 2, 2], [-r0 - w + 2, -h - 2], [-r0 - w + 2, 2],
-      ];
-      let best = null;
-      let bestScore = Infinity;
-      cands.forEach(([dx, dy], i) => {
-        const r = { x: cx + dx, y: cy + dy, w, h };
-        let score = i * 0.01;
-        if (boxes.some((b) => r.x < b.x + b.w && r.x + r.w > b.x && r.y < b.y + b.h && r.y + r.h > b.y)) score += 10;
-        if (hitsSeg(r)) score += 3;
-        if (r.x < box.x || r.x + r.w > box.x + box.w || r.y < box.y || r.y + r.h > box.y + box.h) score += 20;
-        if (score < bestScore) {
-          bestScore = score;
-          best = r;
+      let chosen = null;
+      // English and Chinese on two lines if there is room, else English alone; a minor
+      // station whose label cannot be placed without covering another goes unlabelled
+      for (const [mode, w, h] of [['full', Math.max(wEn, wZh), sizes * 2 + 4], ['en', wEn, sizes + 5]]) {
+        const cands = [];
+        for (const d of [r0, r0 + 12]) {
+          cands.push([d, -h / 2], [-d - w, -h / 2], [-w / 2, -d - h], [-w / 2, d], [d - 2, -h - 2], [d - 2, 2], [-d - w + 2, -h - 2], [-d - w + 2, 2]);
         }
-      });
-      boxes.push(best);
-      out.set(st.id, best);
+        let best = null;
+        let bestScore = Infinity;
+        cands.forEach(([dx, dy], i) => {
+          const r = { x: cx + dx, y: cy + dy, w, h, mode };
+          let score = i * 0.01;
+          if (collides(r, st.id)) score += 10;
+          if (hitsSeg(r)) score += 3;
+          if (outside(r)) score += 20;
+          if (score < bestScore) {
+            bestScore = score;
+            best = r;
+          }
+        });
+        if (bestScore < 10) {
+          chosen = best;
+          break;
+        }
+        if (mode === 'en' && important.has(st.id)) chosen = best;
+      }
+      if (!chosen) continue;
+      boxes.push(chosen);
+      out.set(st.id, chosen);
     }
     labelCache.set(key, out);
     if (labelCache.size > 40) labelCache.delete(labelCache.keys().next().value);
@@ -181,8 +211,8 @@
       const r = placed.get(st.id);
       if (!r) continue;
       const strong = ends.has(st.id);
-      G.text(ctx, st.name.zh, r.x + 2, r.y + size + 1, { size: size + 1, weight: 700, color: strong ? '#111' : '#2c2f36', family: 'cjk' });
-      G.text(ctx, st.name.en, r.x + 2, r.y + size * 2 + 2, { size: size - 1, weight: 600, color: strong ? '#333' : '#5b606b' });
+      G.text(ctx, st.name.en, r.x + 2, r.y + size + 1, { size: size + 1, weight: 700, color: strong ? '#111' : '#2c2f36' });
+      if (r.mode === 'full') G.text(ctx, st.name.zh, r.x + 2, r.y + size * 2 + 2, { size: size - 1, weight: 600, color: strong ? '#333' : '#5b606b' });
     }
     // home / office
     if (day.home) {

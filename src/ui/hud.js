@@ -124,7 +124,7 @@
       const ln = LEVEL_NAMES[seg.kind] || ['', seg.kind];
       where = `${seg.depth === 0 ? 'G' : `B${seg.depth}`} · ${ln[1]}${seg.flow !== 'two-way' ? ` · ${seg.flow}` : ''}`;
     }
-    const title = `${st.name.zh}  ${st.name.en}`;
+    const title = `${st.name.en}  ${st.name.zh}`;
     const lines = st.lines.map((id) => v.lines.get(id));
     const badgesW = lines.length * 22;
     const nameW = Math.max(G.measure(ctx, title, 20, 800, 'cjk') + badgesW, G.measure(ctx, where, 12, 600)) + 40;
@@ -144,7 +144,7 @@
       ctx.globalAlpha = g.busy ? 0.6 : 1;
       G.roundRect(ctx, gx, 80, gw, 26, 13, 'rgba(11,13,17,0.9)', '#ffd166', 1.5);
       G.roundRect(ctx, gx + 4, 84, 54, 18, 9, '#ffd166');
-      G.text(ctx, '导航 NAV', gx + 31, 97, { size: 10, weight: 800, align: 'center', color: '#1b1f25', family: 'cjk' });
+      G.text(ctx, 'NAV', gx + 31, 97, { size: 10, weight: 800, align: 'center', color: '#1b1f25' });
       G.text(ctx, g.text, gx + 68, 98, { size: 14, weight: 700, color: '#ffe7a8', family: 'cjk' });
       ctx.restore();
     }
@@ -157,7 +157,7 @@
     const g = v.glances;
     const phoneTxt = g === Infinity ? '∞' : String(g);
     G.sprite(ctx, 'ic_phone', rx - 64, 58, { scale: 0.5, alpha: g === 0 ? 0.35 : 1 });
-    G.text(ctx, g === 0 ? '✕' : phoneTxt, rx - 44, 50, { size: 16, weight: 800, color: g === 0 ? '#e5484d' : '#e8edf3' });
+    G.text(ctx, g === 0 ? '×' : phoneTxt, rx - 44, 50, { size: 16, weight: 800, color: g === 0 ? '#e5484d' : '#e8edf3' });
     G.text(ctx, 'M map', rx - 44, 66, { size: 9, weight: 700, color: '#8b95a3' });
     if (v.policy.timetable === 'always') G.text(ctx, 'T times', rx - 110, 66, { size: 9, weight: 700, color: '#8b95a3' });
 
@@ -177,7 +177,7 @@
     // ---- fast forward
     if (v.speed > 1.5) {
       G.roundRect(ctx, 14, ffY, 92, 26, 6, 'rgba(255,209,102,0.92)');
-      G.text(ctx, `⏩ ×${Math.round(v.speed)}`, 60, ffY + 18, { size: 14, weight: 800, align: 'center', color: '#1b1f25' });
+      G.text(ctx, `» ×${Math.round(v.speed)}`, 60, ffY + 18, { size: 14, weight: 800, align: 'center', color: '#1b1f25' });
     }
 
     // ---- context hint

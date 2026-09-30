@@ -51,8 +51,9 @@
       ctx.fillRect(0, WIN_TOP + 14, W, 10);
       for (let x = -((camX * 0.6) % 520) - 100; x < W; x += 520) {
         G.roundRect(ctx, x, WIN_TOP + 44, 220, 64, 4, '#1c2129');
-        G.text(ctx, st.name.zh, x + 110, WIN_TOP + 78, { size: 26, weight: 800, align: 'center', family: 'cjk' });
-        G.text(ctx, st.name.en, x + 110, WIN_TOP + 99, { size: 14, weight: 600, align: 'center', color: '#c9d1dc' });
+        const nm = G.fit(ctx, st.name.en, 204, 22, 800);
+        G.text(ctx, nm.str, x + 110, WIN_TOP + 76, { size: nm.size, weight: 800, align: 'center' });
+        G.text(ctx, st.name.zh, x + 110, WIN_TOP + 98, { size: 14, weight: 600, align: 'center', color: '#c9d1dc' });
       }
     }
 
@@ -162,7 +163,7 @@
         ctx.restore();
       }
       G.roundRect(ctx, dcx - 34, WIN_TOP - 44, 68, 20, 4, goal ? '#ffd166' : here && atStop ? '#1f7a44' : '#20262f');
-      G.text(ctx, `${k + 1}号车 Car ${k + 1}`, dcx, WIN_TOP - 30, { size: 11, weight: 700, align: 'center', color: goal ? '#1b1f25' : '#e8edf3', family: 'cjk' });
+      G.text(ctx, `Car ${k + 1}`, dcx, WIN_TOP - 30, { size: 11, weight: 700, align: 'center', color: goal ? '#1b1f25' : '#e8edf3' });
     });
     // passengers along the whole train (deterministic per trip)
     const trip = s.ride.trip;
@@ -196,10 +197,10 @@
     let msg;
     if (moving) {
       const nx = v.day.network.stations.find((x) => x.id === sv.stops[pos.next]);
-      msg = `下一站 ${nx.name.zh}   Next ▸ ${nx.name.en}`;
+      msg = `Next: ${nx.name.en}   ${nx.name.zh}`;
     } else {
       const here = v.day.network.stations.find((x) => x.id === sv.stops[pos.stop]);
-      msg = pos.stop === sv.stops.length - 1 ? `终点站 ${here.name.zh}  Terminus — all change` : `${here.name.zh} 到了   ${here.name.en}`;
+      msg = pos.stop === sv.stops.length - 1 ? `Terminus: ${here.name.en}. All change` : `This is ${here.name.en}   ${here.name.zh}`;
     }
     ctx.save();
     ctx.beginPath();
@@ -250,7 +251,11 @@
         ctx.stroke();
         ctx.restore();
       }
-      G.text(ctx, st.name.en, lx, y + 22, { size: 10, weight: k === goalStop ? 800 : 600, align, color: k === goalStop ? '#ffd166' : past ? '#6b7280' : '#e6ebf2' });
+      // stops are evenly spaced: a long name gets the room up to its neighbours' and no more
+      // (an end label is aligned to the end, so it has half a gap plus its overhang)
+      const room = k === 0 || k === n - 1 ? step / 2 + 9 : step - 10;
+      const weight = k === goalStop ? 800 : 600;
+      G.text(ctx, G.ellipsize(ctx, st.name.en, room, 10, weight), lx, y + 22, { size: 10, weight, align, color: k === goalStop ? '#ffd166' : past ? '#6b7280' : '#e6ebf2' });
       if (v.policy.stripTransfers) {
         const others = st.lines.filter((l) => l !== line.id);
         others.forEach((id, i) => G.badge(ctx, v.lines.get(id), x - (others.length - 1) * 8 + i * 16, y - 15, 6));
@@ -263,9 +268,10 @@
 
   /** Five cars, their doors, and where you are standing. */
   function drawTrainDiagram(ctx, me, near, W, goal = -1) {
-    const w = 250;
+    // between the line strip and the car labels, clear of the ticker in the middle
+    const w = 200;
     const x0 = W - w - 24;
-    const y = 222;
+    const y = 186;
     G.roundRect(ctx, x0 - 10, y - 14, w + 20, 34, 8, 'rgba(12,14,18,0.85)');
     const cw = w / RULES.DOORS.length;
     for (let c = 0; c < RULES.DOORS.length; c++) {

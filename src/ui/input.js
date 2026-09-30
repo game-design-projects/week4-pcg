@@ -57,7 +57,7 @@
   /** On-screen buttons for touch devices. */
   function mountTouch(el) {
     const pads = [
-      ['left', '◀'], ['right', '▶'], ['up', '▲'], ['down', '▼'], ['act', 'E'], ['wait', '⏩'], ['map', '🗺'],
+      ['left', '◀'], ['right', '▶'], ['up', '▲'], ['down', '▼'], ['act', 'E'], ['wait', '»'], ['map', 'M'],
     ];
     el.innerHTML = '';
     for (const [k, label] of pads) {

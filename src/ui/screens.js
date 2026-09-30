@@ -75,7 +75,7 @@
     const wd = canContinue ? L.difficulty.WEEK[w.weekday] : null;
     const seedIn = h('input', { class: 'seed-in', placeholder: 'SEED e.g. K7Q2-M4XP', maxlength: 24, 'aria-label': 'Seed' });
     const daySel = h('select', { class: 'seed-day', 'aria-label': 'Weekday difficulty' }, ...L.difficulty.WEEK.map((d, i) => h('option', { value: i }, `${d.day} ${d.zh}`)));
-    const custom = h('div', { class: 'custom', hidden: true }, seedIn, daySel, btn('Play ▸', () => game.startCustom(seedIn.value, Number(daySel.value)), 'small'));
+    const custom = h('div', { class: 'custom', hidden: true }, seedIn, daySel, btn('Play ›', () => game.startCustom(seedIn.value, Number(daySel.value)), 'small'));
     const newHere = !game.tutorialDone() && !canContinue;
     const tutorialBtn = btn(newHere ? 'Day 0: your first day (tutorial) — start here' : 'Replay the tutorial (Day 0)', () => game.startTutorial(), newHere ? 'primary' : '', { dataset: { testid: 'tutorial' } });
     show(
@@ -167,7 +167,7 @@
         routes: p.routeHint ? [{ rides: bestRides, color: 'rgba(255,122,41,0.9)', width: 5, dash: [2, 9], glow: 'rgba(255,122,41,0.8)' }] : [],
       });
     });
-    const cover = h('div', { class: 'map-cover', hidden: true }, h('p', {}, '📵 The app crashed.'), h('p', { class: 'dim' }, 'Hope you remembered the way.'));
+    const cover = h('div', { class: 'map-cover', hidden: true }, h('p', {}, 'The app crashed.'), h('p', { class: 'dim' }, 'Hope you remembered the way.'));
     const countdown = h('div', { class: 'map-timer', hidden: !p.briefingSeconds });
     const notes = [];
     notes.push(`Phone map during the commute: ${p.phoneGlances === Infinity ? 'any time (M)' : p.phoneGlances === 0 ? 'none — battery dead' : `${p.phoneGlances} glance${p.phoneGlances > 1 ? 's' : ''} of ${p.glanceSeconds} s (M)`}`);
@@ -177,7 +177,7 @@
     if (!p.escalatorTimers) notes.push('Escalator reversal timers: not shown');
     if (!p.minimap) notes.push('No station minimap');
     if (day.checkpoints.length) notes.push(`${day.checkpoints.length} checkpoint${day.checkpoints.length > 1 ? 's' : ''} reported on the network`);
-    if (game.weekday <= 2) for (const d of day.disruptions) notes.push(`⚠ ${d.reason} at ${stationById(day, d.station).name.en}`);
+    if (game.weekday <= 2) for (const d of day.disruptions) notes.push(`${d.reason} at ${stationById(day, d.station).name.en}`);
     const adj = game.adjust;
     const memo = adj && adj.mood !== 'steady' && game.mode === 'week'
       ? h('div', { class: 'memo' }, adj.mood === 'easing' ? 'HR memo: “Rough week. Trains should be kinder today.”' : 'Manager: “You have been early. Let’s see you do it again.”', h('span', { class: 'dim' }, ` (Director: ${adj.mood}, slack ${adj.slack >= 0 ? '+' : ''}${adj.slack}s)`))
@@ -194,7 +194,7 @@
     const hint = p.routeHint
       ? h('div', { class: 'hint' }, h('b', {}, 'Nav app suggests: '), ...bestRides.flatMap((r, i) => [i ? ' → ' : '', lineChip(lines.get(r.line)), ` ${stationById(day, r.to).name.en}`]), p.exitHint ? `, exit ${day.office.exit}` : '')
       : p.exitHint ? h('div', { class: 'hint' }, `The office is by exit ${day.office.exit}.`) : null;
-    const go = btn('Leave home ▸', () => {
+    const go = btn('Leave home ›', () => {
       clearTimers();
       onGo();
     }, 'primary big', { dataset: { testid: 'leave-home' } });
@@ -206,9 +206,9 @@
         h(
           'div',
           { class: 'brief-side' },
-          h('p', { class: 'kicker' }, game.mode === 'tutorial' ? `Day 0 入职 · Tutorial · day ${day.seed}` : `${wk.day} ${wk.zh} · ${game.mode === 'daily' ? 'Daily commute' : game.mode === 'custom' ? 'Seed' : `Week ${game.week.seed}`} · day ${day.seed}`),
+          h('p', { class: 'kicker' }, game.mode === 'tutorial' ? `Day 0 · Tutorial · day ${day.seed}` : `${wk.day} ${wk.zh} · ${game.mode === 'daily' ? 'Daily commute' : game.mode === 'custom' ? 'Seed' : `Week ${game.week.seed}`} · day ${day.seed}`),
           h('h2', {}, `Leave home ${fmtClock(day.startTime)}`),
-          h('p', { class: 'lead' }, 'Clock in by ', h('b', {}, '09:00'), ' at Daka Tech, ', h('b', {}, `${office.name.zh} ${office.name.en}`), '. You live by ', h('b', {}, `${home.name.en}`), '.'),
+          h('p', { class: 'lead' }, 'Clock in by ', h('b', {}, '09:00'), ' at Daka Tech, ', h('b', {}, `${office.name.en} ${office.name.zh}`), '. You live by ', h('b', {}, `${home.name.en}`), '.'),
           memo,
           game.mode === 'tutorial'
             ? h('div', { class: 'hint tutorial-intro' },
@@ -261,9 +261,9 @@
           h('li', {}, h('kbd', {}, 'M'), ' phone map (limited later in the week) · ', h('kbd', {}, 'T'), ' timetable · ', h('kbd', {}, 'Esc'), ' pause'))),
         h('div', {}, h('h4', {}, 'The rules'), h('ul', {},
           h('li', {}, h('b', {}, 'Opposing lanes: '), 'passages have two lanes flowing opposite ways. Walk against the crowd and you crawl — switch lanes.'),
-          h('li', {}, h('b', {}, 'One-way corridors: '), 'marked 单向通行. There is always another way back.'),
+          h('li', {}, h('b', {}, 'One-way corridors: '), 'marked "One way" in red on the floor, with arrows. There is always another way back.'),
           h('li', {}, h('b', {}, 'Escalators '), 'only run one way, and some reverse every few minutes. Stairs always work but are slower.'),
-          h('li', {}, h('b', {}, 'Checkpoints '), '(安检 / ID check) make you queue a random time.'),
+          h('li', {}, h('b', {}, 'Checkpoints '), '(security and ID checks) make you queue for a random time.'),
           h('li', {}, h('b', {}, 'Gates: '), 'leaving the paid area and coming back costs a fare. Split hubs make you do it.'),
           h('li', {}, h('b', {}, 'Doors: '), 'you get off at the door you are standing by. Walk through the carriages (← →, slowly: it is crowded) to the one nearest the exit you need.'),
           h('li', {}, h('b', {}, 'Closures: '), 'a passage, escalator or stairs can be shut for works. Find another way.'),
@@ -277,7 +277,7 @@
     const s = game.sim.state;
     const st = game.day.network.stations[s.st];
     const deps = departuresFrom(game.day, st.id, s.t, 5);
-    show(h('div', { class: 'card small-card tt-card' }, h('h2', {}, `${st.name.zh} ${st.name.en}`), h('p', { class: 'dim' }, `Now ${fmtClock(s.t, true)}`),
+    show(h('div', { class: 'card small-card tt-card' }, h('h2', {}, `${st.name.en} ${st.name.zh}`), h('p', { class: 'dim' }, `Now ${fmtClock(s.t, true)}`),
       h('div', { class: 'tt' }, ...deps.map((d) => h('div', { class: 'tt-row' }, lineChip(game.lines.get(d.sv.line)), h('span', { class: 'tt-term' }, `→ ${d.term.name.en}`), h('span', { class: 'tt-times' }, d.times.map((t) => fmtClock(t)).join('  '))))),
       btn('Back (T)', () => game.resume(), 'primary')));
     const onKey = (e) => {
@@ -300,7 +300,7 @@
       h(
         'div',
         { class: 'card small-card tutorial-result' },
-        h('p', { class: 'kicker' }, 'Day 0 入职 · Tutorial'),
+        h('p', { class: 'kicker' }, 'Day 0 · Tutorial'),
         h('h2', {}, r.how !== 'office' ? 'You gave up on the first day' : onTime ? 'First day: made it ✓' : 'First day: made it, late'),
         h('p', { class: 'lead' }, r.arrival !== null ? `Clocked in ${fmtClock(r.arrival, true)} after ${Math.round(trip / 60)} minutes on the metro${onTime ? `, ${fmtDuration(r.margin)} early.` : '.'}` : 'The office will call.'),
         r.learned.length ? h('ul', { class: 'notes learned' }, ...r.learned.map((t) => h('li', {}, `✓ ${t}`))) : null,
@@ -309,7 +309,7 @@
         h(
           'div',
           { class: 'menu' },
-          btn(inProgress ? `Back to the week — ${L.difficulty.WEEK[w.weekday].day} ${L.difficulty.WEEK[w.weekday].zh} ▸` : 'Start the week ▸', () => (inProgress ? game.continueWeek() : game.startWeek()), 'primary', { dataset: { testid: 'tutorial-start-week' } }),
+          btn(inProgress ? `Back to the week — ${L.difficulty.WEEK[w.weekday].day} ${L.difficulty.WEEK[w.weekday].zh} ›` : 'Start the week ›', () => (inProgress ? game.continueWeek() : game.startWeek()), 'primary', { dataset: { testid: 'tutorial-start-week' } }),
           btn('Replay the tutorial', () => game.startTutorial()),
           btn('Back to title', () => game.toTitle(), 'ghost small'),
         ),
@@ -347,13 +347,13 @@
     const bestArr = game.best ? game.best.arrival : day.par.arrival;
     const chat = r.excuse
       ? h('div', { class: 'chat' }, h('div', { class: 'bubble me' }, r.excuse.text), h('div', { class: 'bubble boss' }, h('b', {}, 'Boss: '), r.excuse.reply))
-      : h('div', { class: 'chat' }, h('div', { class: 'bubble boss' }, h('b', {}, 'Boss: '), r.margin > 300 ? 'Early bird! 👀' : 'Morning.'));
+      : h('div', { class: 'chat' }, h('div', { class: 'bubble boss' }, h('b', {}, 'Boss: '), r.margin > 300 ? 'Early bird!' : 'Morning.'));
     const week = game.mode === 'week';
-    const nextLabel = week ? (game.week.weekday > 4 ? 'See the week ▸' : `Next: ${L.difficulty.WEEK[game.week.weekday].day} ▸`) : 'Back to title';
+    const nextLabel = week ? (game.week.weekday > 4 ? 'See the week ›' : `Next: ${L.difficulty.WEEK[game.week.weekday].day} ›`) : 'Back to title';
     const share = `${location.origin === 'null' ? '' : location.origin}${location.pathname}?seed=${encodeURIComponent(day.seed)}&wd=${r.weekday}`;
     const lb = L.leaderboard && game.mode === 'daily' && r.how === 'office' ? L.leaderboard.submitBlock(game, r) : null;
     show(h('div', { class: 'card result' },
-      h('div', { class: `stamp ${onTime ? 'ok' : 'bad'}` }, onTime ? '准时 ON TIME' : '迟到 LATE'),
+      h('div', { class: `stamp ${onTime ? 'ok' : 'bad'}` }, onTime ? 'ON TIME 准时' : 'LATE 迟到'),
       h('h2', {}, r.arrival === null ? 'Day over' : `Clocked in ${fmtClock(r.arrival, true)}`, h('span', { class: `margin ${onTime ? 'ok' : 'bad'}` }, ` · ${marginTxt}`)),
       h('div', { class: 'result-grid' },
         h('div', { class: 'result-map' }, map.cv, h('div', { class: 'legend' }, h('span', { class: 'lg best' }, 'best route'), h('span', { class: 'lg you' }, 'your route'))),
@@ -395,7 +395,7 @@
       if (x.mode === 'train' && x.line) return `on ${x.line.replace('L', 'Line ')} near ${st.name.en}`;
       const seg = day.interiors[x.st].segs[x.seg];
       const lvl = seg.depth === 0 ? 'the street' : `B${seg.depth} ${seg.kind}`;
-      return `${st.name.zh} ${st.name.en} (${lvl})`;
+      return `${st.name.en} ${st.name.zh} (${lvl})`;
     };
     let text;
     if (tr.lostAt) {
@@ -465,7 +465,7 @@
       });
       show(h('div', { class: 'card shop' }, h('p', { class: 'kicker' }, `Evening · tomorrow is ${wd.day} ${wd.zh}`), h('h2', {}, 'Convenience store 便利店'),
         h('p', { class: 'lead' }, `Wage so far ${yen(game.week.wage)}. Aids only change what you are shown tomorrow — the city is still generated the same way.`),
-        h('div', { class: 'aids' }, ...items), btn(`Sleep → ${wd.day} ▸`, onDone, 'primary', { dataset: { testid: 'sleep' } })));
+        h('div', { class: 'aids' }, ...items), btn(`Sleep → ${wd.day} ›`, onDone, 'primary', { dataset: { testid: 'sleep' } })));
     };
     render();
   }
@@ -474,7 +474,7 @@
     const w = game.week;
     const lateDays = w.history.filter((d) => d.margin < 0).length;
     const rating = lateDays === 0 ? ['本月之星', 'Employee of the Month'] : lateDays === 1 ? ['还行', 'A solid week'] : lateDays <= 3 ? ['谈谈吧', 'HR would like a word'] : ['远程办公?', 'Have you considered remote work?'];
-    show(h('div', { class: 'card small-card week' }, h('p', { class: 'kicker' }, `Week ${w.seed}`), h('h2', {}, `${rating[0]} · ${rating[1]}`),
+    show(h('div', { class: 'card small-card week' }, h('p', { class: 'kicker' }, `Week ${w.seed}`), h('h2', {}, `${rating[1]} · ${rating[0]}`),
       h('table', { class: 'week-table' }, h('tr', {}, h('th', {}, 'Day'), h('th', {}, 'Clock-in'), h('th', {}, 'Margin'), h('th', {}, 'Pay')),
         ...w.history.map((d) => h('tr', { class: d.margin < 0 ? 'bad' : 'ok' }, h('td', {}, L.difficulty.WEEK[d.weekday].day), h('td', {}, d.arrival ? fmtClock(d.arrival, true) : '—'), h('td', {}, d.margin >= 0 ? `+${fmtDuration(d.margin)}` : `−${fmtDuration(-d.margin)}`), h('td', {}, yen(d.earned))))),
       h('p', { class: 'lead' }, `Take-home pay: ${yen(w.wage)}`),

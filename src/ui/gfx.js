@@ -4,9 +4,12 @@
   'use strict';
   const L = (root.Late = root.Late || {});
 
-  const FONT_UI = '"Inter", system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "WenQuanYi Zen Hei", sans-serif';
-  const FONT_PIXEL = '"Pixelify Sans", "Courier New", monospace';
-  const FONT_CJK = '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "WenQuanYi Zen Hei", sans-serif';
+  // All three are bundled in assets/fonts (tools/build_fonts.py), so text
+  // looks and measures the same on every machine: English in Inter, Chinese
+  // in a subset of Noto Sans SC holding every character the game can draw.
+  const FONT_UI = '"Inter", "Noto Sans SC", sans-serif';
+  const FONT_PIXEL = '"Pixelify Sans", "Inter", "Noto Sans SC", monospace';
+  const FONT_CJK = FONT_UI;
 
   const PAL = {
     rock: '#12151a',
@@ -97,6 +100,27 @@
     return w;
   }
 
+  /**
+   * The first of `strs` that fits in maxW at `size`; if none does, the last
+   * one shrunk (down to minSize). Returns {str, size}.
+   */
+  function fit(ctx, strs, maxW, size, weight = 600, family, minSize = 7) {
+    const list = Array.isArray(strs) ? strs : [strs];
+    for (const s of list) if (measure(ctx, s, size, weight, family) <= maxW) return { str: s, size };
+    const s = list[list.length - 1];
+    let z = size;
+    while (z > minSize && measure(ctx, s, z, weight, family) > maxW) z -= 0.5;
+    return { str: s, size: z };
+  }
+
+  /** `str` cut short with an ellipsis so it fits in maxW. */
+  function ellipsize(ctx, str, maxW, size, weight = 600, family) {
+    if (measure(ctx, str, size, weight, family) <= maxW) return str;
+    let s = str;
+    while (s.length > 1 && measure(ctx, `${s}…`, size, weight, family) > maxW) s = s.slice(0, -1);
+    return `${s.trimEnd()}…`;
+  }
+
   function roundRect(ctx, x, y, w, h, r, fill, stroke, lw = 1) {
     ctx.beginPath();
     const rr = Math.min(r, w / 2, h / 2);
@@ -168,5 +192,5 @@
     return (h >>> 0) / 4294967296;
   }
 
-  L.gfx = { PAL, FONT_UI, FONT_PIXEL, FONT_CJK, atlas, loadAtlas, sprite, frameSize, font, text, measure, roundRect, badge, arrowGlyph, ARROWS, mix, hashi };
+  L.gfx = { PAL, FONT_UI, FONT_PIXEL, FONT_CJK, atlas, loadAtlas, sprite, frameSize, font, text, measure, fit, ellipsize, roundRect, badge, arrowGlyph, ARROWS, mix, hashi };
 })(typeof self !== 'undefined' ? self : this);
