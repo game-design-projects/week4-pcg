@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cave Diving</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <section id="title" class="screen title">
+    <div class="card">
+      <h1>Cave Diving</h1>
+      <p class="tag">A generated flooded cave, one guideline, and a third of your gas for the way in.</p>
+      <div class="row">
+        <button id="start" class="primary">Start dive</button>
+        <span id="progress" class="muted"></span>
+      </div>
+      <details>
+        <summary>Dive options</summary>
+        <div class="options">
+          <label>Seed <input id="opt-seed" placeholder="random" maxlength="16" autocomplete="off"></label>
+          <label>Level
+            <select id="opt-level">
+              <option value="auto">Auto (adapts to you)</option>
+              <option>0</option><option>1</option><option>2</option><option>3</option><option>4</option>
+              <option>5</option><option>6</option><option>7</option><option>8</option><option>9</option>
+            </select>
+          </label>
+          <label>Map
+            <select id="opt-map">
+              <option value="auto">Auto (less as you improve)</option>
+              <option value="full">Full survey, any time</option>
+              <option value="entrance">Only at the entrance</option>
+              <option value="none">No map</option>
+            </select>
+          </label>
+          <button id="reset" class="link">Reset progress</button>
+        </div>
+      </details>
+      <details>
+        <summary>How to play</summary>
+        <ul class="howto">
+          <li>Follow the amber guideline in, reach the end of the line in the far chamber, and get back to the entrance pool before your gas runs out.</li>
+          <li>You start with 200 bar. Turn for home when a third is gone: the gauge marks the turn pressure. Every cave is checked so that turning there from the main line leaves enough gas to get out, even feeling your way along the line blind.</li>
+          <li>Kicking hard, bumping rock and squeezing through tight spots stir up silt. It hangs in the water for a long time, so the mess you make on the way in is waiting for you on the way out.</li>
+          <li>Hold Space near the line to keep a hand on it. In zero visibility it is the only reliable way out, and the arrows on it, which you can feel, point toward the exit.</li>
+          <li>Side passages end in unsurveyed leads, worth points if you get home. Some have their own line across a gap. You carry one 30 m spool (R) to bridge a gap or to leave a line behind you.</li>
+        </ul>
+        <p class="muted">WASD / arrows: swim · Shift: kick hard · Space (hold): hold the line · R: spool · M: map · H: controls · Esc: pause</p>
+      </details>
+    </div>
+  </section>
+
+  <section id="brief" class="screen hidden">
+    <div class="card wide">
+      <h2 id="brief-title">Dive plan</h2>
+      <div id="brief-facts" class="facts"></div>
+      <div id="brief-map" class="mapbox"></div>
+      <p id="brief-note" class="muted"></p>
+      <div class="row">
+        <button id="descend" class="primary">Descend (Enter)</button>
+        <button id="brief-back">Back</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="pause" class="screen hidden">
+    <div class="card">
+      <h2>Paused</h2>
+      <div class="row">
+        <button id="resume" class="primary">Resume (Esc)</button>
+        <button id="end-dive">End this dive</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="result" class="screen hidden">
+    <div class="card wide">
+      <h2 id="result-title"></h2>
+      <p id="result-headline" class="headline"></p>
+      <div id="result-stats" class="facts"></div>
+      <h3 id="result-notes-title">What happened</h3>
+      <ul id="result-notes" class="notes"></ul>
+      <h3>Dive log</h3>
+      <ol id="result-log" class="log"></ol>
+      <p id="result-next" class="muted"></p>
+      <div class="row">
+        <button id="next" class="primary">Next dive (Enter)</button>
+        <button id="replay">Replay this cave</button>
+        <button id="to-title">Title</button>
+      </div>
+    </div>
+  </section>
+
+  <script src="src/rng.js"></script>
+  <script src="src/gen.js"></script>
+  <script src="src/game.js"></script>
+  <script src="src/render.js"></script>
+  <script src="src/main.js"></script>
+</body>
+</html>

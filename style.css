@@ -1,0 +1,79 @@
+:root {
+  --ink: #081520;
+  --panel: rgba(8, 20, 30, 0.9);
+  --line: rgba(120, 160, 170, 0.28);
+  --text: #dfeaec;
+  --muted: #8ea8b0;
+  --amber: #f0a238;
+  --teal: #2f7280;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text); overflow: hidden; }
+body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+canvas { display: block; }
+
+.screen {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(2, 8, 14, 0.72); overflow-y: auto;
+}
+.screen.hidden { display: none; }
+.screen.title {
+  background: linear-gradient(90deg, rgba(3, 10, 16, 0.92) 0%, rgba(3, 10, 16, 0.55) 55%, rgba(3, 10, 16, 0.15) 100%),
+    url("resources/cave_concept_1.png") center / cover no-repeat;
+  justify-content: flex-start;
+}
+
+.card {
+  width: min(560px, 100%); padding: 24px 28px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; margin: auto 0;
+}
+.title .card { margin-left: max(0px, 6vw); background: rgba(8, 20, 30, 0.8); }
+.card.wide { width: min(880px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; }
+
+h1 { margin: 0 0 4px; font-size: 40px; letter-spacing: 0.02em; color: #f3f7f7; }
+h2 { margin: 0 0 12px; font-size: 24px; }
+h3 { margin: 18px 0 6px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.tag { margin: 0 0 18px; color: #b9ccd0; }
+.muted { color: var(--muted); font-size: 13px; }
+.headline { font-size: 18px; margin: 0 0 12px; color: #f2e6cf; }
+
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+button {
+  font: inherit; color: var(--text); background: #16303b; border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px 16px; cursor: pointer;
+}
+button:hover { background: #1d3d4a; }
+button.primary { background: var(--amber); color: #1d1206; border-color: #c9822a; font-weight: 700; }
+button.primary:hover { background: #f6b45a; }
+button.link { background: none; border: none; color: var(--muted); padding: 4px 0; text-decoration: underline; }
+
+details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 10px; }
+summary { cursor: pointer; color: #cfe0e3; font-weight: 600; }
+.options { display: grid; gap: 10px; margin-top: 10px; }
+.options label { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+input, select {
+  font: inherit; color: var(--text); background: #0d2029; border: 1px solid var(--line);
+  border-radius: 5px; padding: 5px 8px; min-width: 0; width: 60%;
+}
+.howto { padding-left: 18px; margin: 8px 0; }
+.howto li { margin-bottom: 6px; }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.fact { background: rgba(20, 44, 54, 0.6); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.fact b { display: block; font-size: 18px; color: #f3f7f7; }
+.fact span { font-size: 12px; color: var(--muted); }
+.mapbox { margin-top: 14px; }
+.mapbox canvas { width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+
+.notes { padding-left: 18px; margin: 0; }
+.notes li { margin-bottom: 6px; }
+.log { list-style: none; padding: 0; margin: 0; font-size: 14px; }
+.log li { display: flex; gap: 12px; padding: 3px 0; border-bottom: 1px solid rgba(120, 160, 170, 0.1); }
+.log time { color: var(--amber); font-variant-numeric: tabular-nums; min-width: 44px; }
+
+@media (max-width: 600px) {
+  h1 { font-size: 30px; }
+  .card { padding: 18px; }
+  .title .card { margin-left: 0; }
+}
