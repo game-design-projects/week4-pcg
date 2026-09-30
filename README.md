@@ -12,15 +12,19 @@ Build a game prototype that incorporates PCG: generate the levels, or something 
 
 ## What we built
 
-**Cave Diving** (working title) is a browser game about finding your way through a generated, flooded maze, seen in side cross-section. Nobody has laid a guideline for you. You tie your reel in at a post in the entrance pool, and it pays out line behind you as you search the dark passages for the end chamber. Then you have to get back to the pool before your gas runs out, and in a silt-out, the line you laid is the only way you will find it. Level 0 is a tutorial that teaches laying and following the line; the mazes start at level 1 and grow with each dive.
+**Cave Diving** (working title) is a browser game about finding your way through a generated, flooded maze, seen in side cross-section. Nobody has laid a guideline for you. You tie your reel in at a post in the entrance pool, and it pays out line behind you as you search the dark passages for the end chamber. Then you have to get back to the pool before your gas runs out, and in a silt-out, the line you laid is the only way you will find it. Level 0 is a tutorial that teaches laying and following the line; the mazes start at level 1 and grow with each dive. There is also a **daily maze**: one shared seed per day, with a leaderboard that replays every submitted dive on the server.
 
 This is prototype 2. Prototype 1 (a subway transfer game called Late) is developed separately on the `pcg-prototype` branch. Requirements and ideas are in [`idea.md`](idea.md).
 
 ![Dive plan with the generated maze survey](docs/plan.png)
 
-| Laying line in the maze | Tutorial: following the line out blind | After a failed dive |
-| --- | --- | --- |
-| ![Diver laying line with the lamp](docs/dive.png) | ![Zero visibility, hand on the line](docs/tutorial.png) | ![Generated post-mortem](docs/post-mortem.png) |
+| Laying line in the maze | Tutorial: following the line out blind |
+| --- | --- |
+| ![Diver laying line with the lamp](docs/dive.png) | ![Zero visibility, hand on the line](docs/tutorial.png) |
+
+| After a failed dive | The daily maze leaderboard |
+| --- | --- |
+| ![Generated post-mortem](docs/post-mortem.png) | ![Daily maze result with the leaderboard](docs/daily.png) |
 
 ### How to play
 
@@ -30,6 +34,8 @@ This is prototype 2. Prototype 1 (a subway transfer game called Late) is develop
 - **M:** survey map, when this dive allows one. It shows the passages, not the way through. **H:** show or hide the controls. **Esc:** pause.
 
 You start with 200 bar. The gauge marks the turn pressure, 133 bar, where a third of your gas is gone. If your line runs unbroken from the post in the pool and you turn at turn pressure, you always have the gas to follow it out, even blind. After every dive, the game writes a short log of what happened and points out the decisions that cost you.
+
+**Daily maze** on the title screen gives everyone the same level 4 maze for the day (UTC), with the survey left at the entrance. Tag the end chamber and get home, and you can submit the dive to that day's board, which ranks by gas left.
 
 ## How our PCG works
 
@@ -75,15 +81,39 @@ Two scripts in [`tools/`](tools/) run the game headless in Node.
 
 (Averages over the 200 mazes at each level.)
 
-`node tools/autopilot.js 30 9` dives 30 mazes at each of levels 0, 3, 6 and 9 with a scripted diver. It ties in at the post, swims the checked route laying line, ties off in the end chamber, then holds the line and follows it home. It does this in three ways:
+`node tools/autopilot.js 30 9` dives 30 mazes at each of levels 0, 3, 6 and 9 with a scripted diver ([`tools/pilot.js`](tools/pilot.js)). It plays through the same input path as a player: it swims down from the surface to the post, presses R to tie in, swims the checked route laying line, presses R again in the end chamber, then holds Space and follows the line home. It does this in three ways:
 
 | Autopilot | Got home | Gas used to reach the end chamber (mean, level 9) | Gas left (lowest, any level) |
 | --- | --- | --- | --- |
-| Normal kick, straight in and back | 120 / 120 | 42 bar | 115 bar |
-| Kicking hard all the way in | 120 / 120 | 59 bar | 95 bar |
-| Lingering at the end until turn pressure (133 bar), then zero visibility all the way out | 120 / 120 | 42 bar | 57 bar |
+| Normal kick, straight in and back | 120 / 120 | 46 bar | 111 bar |
+| Kicking hard all the way in | 120 / 120 | 64 bar | 91 bar |
+| Lingering at the end until turn pressure (133 bar), then zero visibility all the way out | 120 / 120 | 46 bar | 56 bar |
 
 The last row is the guarantee in practice: a diver who turns at turn pressure with an unbroken line from the pool gets out, even blind. The direct route to the end chamber uses much less than a third of the gas. The rest of that third is room for wrong turns.
+
+Every dive in the first two rows was also replayed from its recorded inputs, and all 240 replays ended exactly as the live dive did (the third row fills the cave with silt from outside the game, so it can't be replayed). `npm test` runs the same kind of checks, plus the leaderboard Worker, in a few seconds.
+
+## Telemetry and the leaderboard
+
+Both follow Late and our Week 3 game, with this game's own Cloudflare Worker and D1 database ([`server/`](server/)). Neither is needed to play. With no Worker configured (the default), or with the Worker unreachable, the game plays exactly the same and nothing leaves the browser.
+
+**Anonymous, opt-in telemetry** ([`src/telemetry.js`](src/telemetry.js)). Every finished or abandoned dive (ended from the menu, or the tab closed mid-dive) is saved in the browser first. It is only sent to the Worker if the player agreed on the card shown before the first dive. Privacy on the title screen changes that choice, exports everything recorded as JSON, or deletes it. The only identifier is a random player id made in the browser. The Worker never reads or stores IP addresses, User-Agent or location, and the database has no columns for them. Each record holds:
+
+- what regenerates the dive: seed, level, map setting, generator version, and whether the level and map were picked automatically, by hand, or by the daily maze;
+- the result: home, out of gas or abandoned, whether the end chamber was tagged, gas left and dive time;
+- what we tune the generator and the difficulty with: where the diver turned for home (metres in, gas left then, position, and how long after turn pressure), when turn pressure came, silt-outs and time in zero visibility, dead ends, rock hits, and how the line was used (tied in at the pool or loose or not at all, metres laid, time spent holding it);
+- the maze's own measures and budget, and the recorded inputs, which replay the whole dive offline.
+
+**The daily maze leaderboard** ([`src/leaderboard.js`](src/leaderboard.js), [`server/src/scores.js`](server/src/scores.js)). A dive is only sent when the player presses Submit on the result screen, under a nickname they choose. The submission is the board (`daily-YYYY-MM-DD`), its seed, level and map setting, the generator version, and the list of inputs. The Worker regenerates the maze with the game's own generator and replays the inputs with the game's own movement and gas rules. The gas left and the time come from that replay, never from the client. A replay that never tags the end chamber or never gets home is refused, and so are wrong settings, an old generator version and malformed inputs. There is one board per day, with one row per player (their best dive), ranked by gas left and then by the quicker dive. The board shows nicknames only, never player ids. Rows can be deleted for moderation with a secret token.
+
+This works because a dive is deterministic. The simulation steps at a fixed 60 Hz and uses only +, −, ×, ÷, square root and floor, with its own sine and cosine, so every JavaScript engine computes the same numbers. Input is 8 directions plus kick, hold and reel, and only changes are recorded as `[tick, bits]`. [`src/rng.js`](src/rng.js), [`src/gen.js`](src/gen.js), [`src/game.js`](src/game.js) and [`src/daily.js`](src/daily.js) are plain JavaScript with no DOM, so the Worker imports them directly.
+
+### Running it
+
+- Locally, with no Cloudflare account: `node tools/local_server.mjs` (Node 22 or later) serves the game at http://localhost:8787 with the real Worker code on an in-memory SQLite database. The consent card, the Privacy screen and the daily board then work end to end. Nothing is kept when it stops.
+- Deploying the Worker (from `server/`): `npm install`, `npm run db:create`, then copy the printed database id into `wrangler.toml`. Run `npm run db:migrate`, `npx wrangler secret put READ_TOKEN`, and `npm run deploy`. Then put the Worker's URL in [`src/config.js`](src/config.js) (`TELEMETRY_ENDPOINT` ending in `/v1/sessions`, `LEADERBOARD_ENDPOINT` ending in `/v1/scores`).
+- Export sessions: `curl -H "authorization: Bearer $READ_TOKEN" "https://<worker>/v1/sessions?since=2026-09-01"`. Moderate: list a board with the same header (`GET /v1/scores?board=daily-2026-09-30` then includes row ids), then `DELETE /v1/scores/<id>`.
+- Cost: replaying a daily dive takes about 20–60 ms of CPU in Node, plus 30–110 ms to generate the maze the first time a Worker instance sees that day. That is more than the 10 ms per request that the Workers Free plan allows, so the leaderboard needs the Workers Paid plan. Telemetry alone should fit in the free plan. We could not open Cloudflare's limits page from our environment, so check it before deploying.
 
 ## Art
 
@@ -102,7 +132,9 @@ No build step and no dependencies: open `index.html` in a browser. It also works
 
 - URL options: `?seed=K7Q2ZP&level=4&map=none` (`map` is `full`, `entrance` or `none`; `level=0` is the tutorial). The same choices are under "Dive options" on the title screen.
 - Progress (dive number and level) is kept in the browser's local storage. "Reset progress" on the title screen clears it.
+- Tests: `npm test` (Node 22 or later; no packages to install). It checks that dives replay exactly from their inputs and that the game code has no browser dependencies, and runs the Worker against SQLite.
 - Generator and balance checks: `node tools/check_gen.js [seeds per level] [max level]` and `node tools/autopilot.js [dives] [max level]`.
+- Telemetry and the leaderboard are off until a Worker is configured; see above.
 
 We have only measured frame rate in headless Chromium without a GPU: about 28 fps at 1600×900. It has not been measured in a desktop browser yet.
 
@@ -124,18 +156,22 @@ The Bilibili channel [神秘园](https://space.bilibili.com/87670515), which tel
 ## Project layout
 
 - `index.html`, `style.css`: the page and its screens.
-- `src/rng.js`: seeded random numbers and value noise.
+- `src/rng.js`: seeded random numbers, value noise, and the sine and cosine the simulation uses.
 - `src/gen.js`: the maze generator and the fairness check.
-- `src/game.js`: one dive (movement, laying and following the line, silt, gas, the tutorial steps, the run log and the post-mortem).
+- `src/game.js`: one dive (movement, laying and following the line, silt, gas, the tutorial steps, the run log, the post-mortem, and input recording and replay).
+- `src/daily.js`: the daily maze's seed and settings, shared with the Worker.
 - `src/render.js`: drawing (cave walls, lighting, silt, HUD, survey map).
+- `src/config.js`, `src/telemetry.js`, `src/leaderboard.js`: the Worker's address, the opt-in telemetry and Privacy screen, and the daily board.
 - `src/main.js`: screens, input, the game loop and the between-dive director.
-- `tools/`: sprite cutting and the headless checks.
+- `server/`: this game's Cloudflare Worker and D1 schema.
+- `test/`: `npm test`.
+- `tools/`: sprite cutting, the headless checks, the scripted diver, and the local server.
 - `resources/`: the generated art. `resources/sprites/` holds the cut sprites.
 - `docs/`: screenshots for this README.
 
 ## Not built yet
 
-- Telemetry and a leaderboard (the Week 3 Worker + D1 pattern) are not included. If added, they would need their own Worker and database, and the game must keep working without them.
+- The Worker has not been deployed yet, so `src/config.js` has no endpoints and nothing is sent. It has only run under `node --test` and `tools/local_server.mjs`, and we checked that it bundles with esbuild (which wrangler uses).
 - Jev is not used. The between-dive director is a simple one-level step.
 - The teammate idea, sound, touch controls, and line markers (arrows or cookies) the diver could place.
 

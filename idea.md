@@ -14,6 +14,8 @@ The player is a solo cave diver finding their way through a generated, flooded m
 - No pre-laid guideline. The player lays their own line with the reel (tie in, lay, tie off).
 - Level 0 is a tutorial that teaches laying a guideline before the real dives start.
 - Built as a web page in HTML and JS.
+- Anonymous, opt-in telemetry and a server-replayed leaderboard, the same way as Late and the Week 3 game, on this game's own Worker and D1 database. The game stays fully playable with both off or the Worker unreachable, and the generator and the movement and gas rules run without the browser so the Worker can replay a dive.
+- The UI looks finished: no seams between tiles, and consistent spacing and alignment on every screen.
 - The art concept comes first, made with ChatGPT image generation, including sprite sheets. Art and code are kept separate; generated art goes in `resources/`.
 - The real accident stories on the Bilibili channel 神秘园 are a reference for how bad outcomes build up from small decisions. We borrow that decision structure only, and do not reuse any real incident, place or person.
 
@@ -39,7 +41,7 @@ The player is a solo cave diver finding their way through a generated, flooded m
 
 **Seeds.** The same seed gives the same cave, and the seed is shown so a dive can be replayed.
 
-**Telemetry and leaderboard (optional).** The Week 3 approach (opt-in anonymous telemetry and a server-validated leaderboard on a small Cloudflare Worker with D1) could be reused, since a dive is fully determined by its seed and its moves. Not decided for this prototype. If used, it would need its own Worker and database, and the game must work fully without it.
+**Telemetry and leaderboard.** A dive is fully determined by its seed and its inputs, so the server can replay it. What telemetry records should feed the level dials: where divers turn, how often they silt out, and whether they lay a line. Beyond one daily board, there could be weekly or per-level boards.
 
 **Hand-made.** Rules, art, sound, and text templates.
 
@@ -64,7 +66,7 @@ Each generated maze should be checked to be winnable within the air budget, with
 
 - How long a dive should last in real time, and whether a session is one dive or a series.
 - Whether the difficulty measures we can compute match how hard a dive feels to players.
-- Whether telemetry and a leaderboard are worth including here.
+- Whether the leaderboard is worth the Cloudflare Workers Paid plan it needs to replay dives.
 - Whether Jev can be called from a static page.
 - The cave diving terms and rules used above were checked against search excerpts of the sources listed in the README, not the full pages.
 
@@ -72,5 +74,5 @@ Each generated maze should be checked to be winnable within the air budget, with
 
 - [`research/sok-pcg.md`](research/sok-pcg.md): PCG content types, layout algorithms, and quality-control strategies.
 - [`research/sok-pcg-genres.md`](research/sok-pcg-genres.md): PCG across genres, including Director-style adaptivity.
-- [Week 3 repo](https://github.com/game-design-projects/week3): the Cloudflare Worker + D1 telemetry collector and server-validated leaderboard, if we reuse that approach.
+- [Week 3 repo](https://github.com/game-design-projects/week3) and Late (`late-game` branch): the Cloudflare Worker + D1 telemetry collector and server-validated leaderboard that this game follows.
 - [神秘园 on Bilibili](https://space.bilibili.com/87670515): reference channel for real outdoor accident stories.
