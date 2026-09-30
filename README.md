@@ -45,9 +45,18 @@ Randomness comes from a seeded generator, so the same seed gives the same day.
 
 What is not procedural: the rules, the items, the art, and the text templates are hand-made. Hiding information from the player (the timetable shown once, out-of-date signs) is a difficulty setting in how the game is displayed, not generated content.
 
+## Telemetry and leaderboard (planned)
+
+Following our Week 3 game ([`game-design-projects/week3`](https://github.com/game-design-projects/week3)), we plan to add:
+
+- **Anonymous, opt-in telemetry.** Sessions are recorded locally first. Only if the player agrees on a first-run card are finished sessions sent to a small Cloudflare Worker that stores them in a D1 database. The Worker does not read or store IP address, User-Agent or location; the only identifier is a random id kept in the browser. Each record includes the seed, so a generated day can be reproduced and used to check how hard it really is.
+- **Leaderboard.** Because a day is fully determined by its seed, a player submits the seed and their actions, and the Worker regenerates the day and replays them to work out the score, instead of trusting the client. Submitting is the player's consent, and only a nickname is shown.
+
+The game stays fully playable offline or with both turned off. Details are in [`idea.md`](idea.md).
+
 ## How to run
 
-The prototype is not implemented yet. The plan is a static web page with no build step: open `index.html` in a browser. rot.js (2.2.1) may be vendored into the repo for its seeded RNG and map generators.
+The prototype is not implemented yet. The plan is a static web page with no build step: open `index.html` in a browser. rot.js (2.2.1) may be vendored into the repo for its seeded RNG and map generators. Telemetry and the leaderboard would need our own Worker and D1 database, deployed separately with wrangler; the game itself does not depend on them.
 
 ## Research notes
 

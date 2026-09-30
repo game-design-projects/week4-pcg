@@ -15,6 +15,7 @@ The player is late for work. Each in-game day they must get from home to the off
 - Difficulty rises by giving the player less information (for example having to remember the timetable) and by adding identity-check checkpoints that force the player to stand and wait.
 - The network and its details are generated, so each day is different.
 - Built as a web page in HTML and JS.
+- Anonymous, opt-in telemetry and a public leaderboard, following the approach of our Week 3 game (a small Cloudflare Worker with a D1 database). The game must stay fully playable with both switched off or unreachable.
 
 ## Ideas (all tentative)
 
@@ -40,6 +41,19 @@ The player is late for work. Each in-game day they must get from home to the off
 
 **Scoring.** How early or late the player arrives. A wage counter that lateness reduces, spent on small aids between days (for example one that keeps information visible longer).
 
+**Anonymous telemetry (reusing the Week 3 pattern).** Week 3 (`game-design-projects/week3`) recorded each finished session locally first, then sent it to a Cloudflare Worker that stores it in D1, only after the player opted in on a first-run card. The Worker never reads or stores IP, User-Agent or geo; the only identifier is a random player id kept in the browser. We would do the same, with our own Worker and database rather than sharing Week 3's. What it is for here is checking the generator, not just the player:
+- Which seeds and difficulty settings players fail or abandon, to see whether "hard by the numbers" matches "hard to play" (an open question below).
+- How often the winnable-check had to regenerate a day, and how the parameters were set.
+- Where players lose time (wrong turns, waiting, hubs), and how long a day takes.
+- Whether hiding information actually raises difficulty.
+A session record would carry the seed and settings, so any day can be regenerated and studied later. Data can also stay local and be exported by hand, as in Week 3.
+
+**Leaderboard (reusing the Week 3 pattern).** Week 3 accepted a score only when the player pressed Submit, replayed the submitted moves on the server with the game's own rules code, and computed the score itself instead of trusting the client. The same idea fits here because a day is fully determined by its seed: the client submits the seed, the settings and the list of actions, and the Worker regenerates the day and replays them. Ideas for boards:
+- One board per shared seed, for example a daily seed, ranked by how early the player arrived.
+- Possibly a best-week board (sum over the five days).
+- One line per player per board, a chosen nickname, and no player id shown. Moderation by deleting a row with a secret token.
+Submitting is the consent for the leaderboard, separate from the telemetry opt-in. The pieces that need the game rules to run in the Worker (the generator and the movement rules) have to be importable without the browser, which affects how we structure the code.
+
 **Hand-made.** Rules, aids, art, sound, and text templates such as the excuse sent to the boss after a late day.
 
 **Tech.** A static page with no build step, drawn on a canvas. rot.js may help with seeded randomness and floor-plan generation.
@@ -55,8 +69,12 @@ Each generated day should be checked to be winnable (a perfect player can get th
 - How long a day should last in real time.
 - Whether the difficulty measures we can compute match how hard the day feels to players.
 - Whether Jev can be called from a static page.
+- Whether replaying a whole day in a Worker is cheap enough, and how to keep a shared seed's board fair when players may retry (one attempt per seed, or best of many).
+- What to record so a generated day can be reproduced: seed only, or seed plus generator version (a change to the generator would invalidate old boards).
+- Whether the telemetry needs to tell which players are repeats, given that the id is only a random value in the browser.
 
 ## References
 
 - [`research/sok-pcg.md`](research/sok-pcg.md): PCG content types, layout algorithms, and quality-control strategies.
 - [`research/sok-pcg-genres.md`](research/sok-pcg-genres.md): PCG across genres, including Director-style adaptivity.
+- [Week 3 repo](https://github.com/game-design-projects/week3): the Cloudflare Worker + D1 telemetry collector and server-validated leaderboard we are borrowing from (`server/telemetry/`, `src/telemetry/`, `src/leaderboard.js`, and the consent card in `src/ui/consent.js`).
