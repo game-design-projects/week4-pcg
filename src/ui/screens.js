@@ -4,6 +4,7 @@
   'use strict';
   const L = (root.Late = root.Late || {});
   const { fmtClock, fmtDuration, RULES } = L.rules;
+  const yen = (n, sign) => (n < 0 ? `−¥${-n}` : `${sign && n > 0 ? '+' : ''}¥${n}`);
   const TT = L.timetable;
 
   let overlay = null;
@@ -254,7 +255,8 @@
           h('li', {}, h('b', {}, 'Escalators '), 'only run one way, and some reverse every few minutes. Stairs always work but are slower.'),
           h('li', {}, h('b', {}, 'Checkpoints '), '(安检 / ID check) make you queue a random time.'),
           h('li', {}, h('b', {}, 'Gates: '), 'leaving the paid area and coming back costs a fare. Split hubs make you do it.'),
-          h('li', {}, h('b', {}, 'Doors: '), 'you get off where you got on — pick the car near the exit you need.'),
+          h('li', {}, h('b', {}, 'Doors: '), 'you get off at the door you are standing by. Walk through the carriages (← →, slowly: it is crowded) to the one nearest the exit you need.'),
+          h('li', {}, h('b', {}, 'Closures: '), 'a passage, escalator or stairs can be shut for works. Find another way.'),
         ))),
       h('p', { class: 'dim' }, 'Each day is generated from a seed and checked by a solver: a perfect commuter can always make it with time to spare, even with the longest queues.'),
       back));
@@ -327,8 +329,8 @@
           stat('Standing about', fmtDuration(s.idle)),
           stat('Against the crowd', fmtDuration(s.against)),
           stat('Trains boarded', String(s.boards)),
-          stat('Pay today', `${r.earned >= 0 ? '+' : ''}¥${r.earned}${r.fine ? ` (fine ¥${r.fine})` : ''}${r.fares ? ` (fares ¥${r.fares})` : ''}`),
-          week ? stat('Wage this week', `¥${game.week.wage}`) : null,
+          stat('Pay today', `${yen(r.earned, true)}${r.fine ? ` (fine ¥${r.fine})` : ''}${r.fares ? ` (fares ¥${r.fares})` : ''}`),
+          week ? stat('Wage this week', yen(game.week.wage)) : null,
           chat)),
       analysis,
       lb,
@@ -425,7 +427,7 @@
           }, owned ? 'ghost small' : 'small', { disabled: owned || game.week.wage < a.price }));
       });
       show(h('div', { class: 'card shop' }, h('p', { class: 'kicker' }, `Evening · tomorrow is ${wd.day} ${wd.zh}`), h('h2', {}, 'Convenience store 便利店'),
-        h('p', { class: 'lead' }, `Wage so far ¥${game.week.wage}. Aids only change what you are shown tomorrow — the city is still generated the same way.`),
+        h('p', { class: 'lead' }, `Wage so far ${yen(game.week.wage)}. Aids only change what you are shown tomorrow — the city is still generated the same way.`),
         h('div', { class: 'aids' }, ...items), btn(`Sleep → ${wd.day} ▸`, onDone, 'primary', { dataset: { testid: 'sleep' } })));
     };
     render();
@@ -437,8 +439,8 @@
     const rating = lateDays === 0 ? ['本月之星', 'Employee of the Month'] : lateDays === 1 ? ['还行', 'A solid week'] : lateDays <= 3 ? ['谈谈吧', 'HR would like a word'] : ['远程办公?', 'Have you considered remote work?'];
     show(h('div', { class: 'card small-card week' }, h('p', { class: 'kicker' }, `Week ${w.seed}`), h('h2', {}, `${rating[0]} · ${rating[1]}`),
       h('table', { class: 'week-table' }, h('tr', {}, h('th', {}, 'Day'), h('th', {}, 'Clock-in'), h('th', {}, 'Margin'), h('th', {}, 'Pay')),
-        ...w.history.map((d) => h('tr', { class: d.margin < 0 ? 'bad' : 'ok' }, h('td', {}, L.difficulty.WEEK[d.weekday].day), h('td', {}, d.arrival ? fmtClock(d.arrival, true) : '—'), h('td', {}, d.margin >= 0 ? `+${fmtDuration(d.margin)}` : `−${fmtDuration(-d.margin)}`), h('td', {}, `¥${d.earned}`)))),
-      h('p', { class: 'lead' }, `Take-home pay: ¥${w.wage}`),
+        ...w.history.map((d) => h('tr', { class: d.margin < 0 ? 'bad' : 'ok' }, h('td', {}, L.difficulty.WEEK[d.weekday].day), h('td', {}, d.arrival ? fmtClock(d.arrival, true) : '—'), h('td', {}, d.margin >= 0 ? `+${fmtDuration(d.margin)}` : `−${fmtDuration(-d.margin)}`), h('td', {}, yen(d.earned))))),
+      h('p', { class: 'lead' }, `Take-home pay: ${yen(w.wage)}`),
       h('div', { class: 'menu' }, btn('Start a new week', () => game.startWeek(), 'primary'), btn('Title', () => game.toTitle()))));
   }
 

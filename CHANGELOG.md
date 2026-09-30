@@ -4,6 +4,20 @@ What changed in Late, and why. Versions after 0.1 come from the improvement loop
 generated days through the solver and the autopilot (`node tools/sweep.js`), look for days that
 are trivial, unfair or dull, change the generator or the rules, and measure again.
 
+## 0.3.1 — fixes found while playing for the screenshots
+
+No generator change (still `g3`: every seed gives the same day as in 0.3.0).
+
+- The in-game help still said "you get off where you got on", which stopped being true in 0.2 when walking
+  through the carriages became a rule. It now explains the doors as they work, and mentions closures.
+- On a train, the top of the screen showed the station you boarded at for the whole ride. It now names the
+  stop you are at or coming to, next to the line and its direction.
+- A day that cost more than it paid showed "¥-3"; money now reads "−¥3" on the result, the week summary, the
+  shop and the HUD.
+- The line strip above the train doors let the gangway show through it, and a one-way plaque could sit on top
+  of a wayfinding sign. Both redrawn.
+- README rewritten to match what exists, with screenshots.
+
 ## 0.3.0 — second loop: generate less waste, meet the checkpoints, explain lost days
 
 Same 40 seeds per weekday; report in [`docs/sweeps/0.3.md`](docs/sweeps/0.3.md).

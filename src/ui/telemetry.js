@@ -18,7 +18,7 @@
     LEADERBOARD_ENDPOINT: null, // e.g. 'https://late-telemetry.<account>.workers.dev/v1/scores'
   });
 
-  const APP_VERSION = '0.3.0';
+  const APP_VERSION = '0.3.1';
   const KEY = 'late.telemetry.v1';
   const SETTINGS_KEY = 'late.settings.v1';
   const MAX_SESSIONS = 300;

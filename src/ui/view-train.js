@@ -208,7 +208,7 @@
     const x0 = 70;
     const x1 = W - 70;
     const y = 128;
-    G.roundRect(ctx, 20, 106, W - 40, 56, 8, 'rgba(12,14,18,0.92)');
+    G.roundRect(ctx, 20, 106, W - 40, 56, 8, '#0c0e12');
     ctx.fillStyle = line.color;
     ctx.fillRect(x0, y - 3, x1 - x0, 6);
     const step = (x1 - x0) / Math.max(1, n - 1);

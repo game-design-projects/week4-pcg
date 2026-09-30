@@ -171,8 +171,8 @@
       // one-way plaque
       const px = (x0 + x1) / 2;
       if (px > cam.x - 100 && px < cam.x + cam.w + 100) {
-        G.roundRect(ctx, px - 58, row.y + 24, 116, 22, 4, '#b8321f');
-        G.text(ctx, `单向通行 One way ${seg.dir > 0 ? '→' : '←'}`, px, row.y + 40, { size: 12, weight: 700, align: 'center' });
+        G.roundRect(ctx, px - 58, row.y + 48, 116, 22, 4, '#b8321f');
+        G.text(ctx, `单向通行 One way ${seg.dir > 0 ? '→' : '←'}`, px, row.y + 64, { size: 12, weight: 700, align: 'center' });
       }
     }
     if (seg.kind === 'unpaid') {

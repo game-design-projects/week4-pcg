@@ -110,12 +110,15 @@
     G.text(ctx, late ? `LATE +${L.rules.fmtDuration(-left)}` : `Clock-in 09:00 · ${Math.floor(left / 60)}m ${String(Math.floor(left % 60)).padStart(2, '0')}s left`, 70, 92, { size: 11, weight: 700, color: late ? '#ff8a80' : '#b9c2cf' });
 
     // ---- where
-    const st = v.station;
+    let st = v.station;
     let where = '';
     if (v.sim.mode === 'train') {
       const sv = v.day.timetable.services[v.sim.ride.service];
       const term = stationName(v.day, sv.stops[sv.stops.length - 1]);
-      where = `${sv.line.replace('L', 'Line ')} → ${term.en}`;
+      const pos = TT.tripPosition(sv, v.sim.ride.trip, v.t);
+      const k = pos ? (pos.state === 'at' ? pos.stop : pos.next) : v.sim.ride.from;
+      st = v.day.network.stations.find((x) => x.id === sv.stops[k]) || st;
+      where = `${sv.line.replace('L', 'Line ')} → ${term.en} · ${pos && pos.state === 'at' ? 'at this stop' : 'next stop'}`;
     } else {
       const seg = v.I.segs[v.sim.seg];
       const ln = LEVEL_NAMES[seg.kind] || ['', seg.kind];
@@ -135,7 +138,7 @@
     const rx = W - 14;
     G.roundRect(ctx, rx - 236, 12, 236, 62, 10, 'rgba(11,13,17,0.86)', 'rgba(255,255,255,0.1)');
     G.text(ctx, v.dayLabel, rx - 222, 38, { size: 16, weight: 800, family: 'cjk', color: '#ffd166' });
-    G.text(ctx, `¥${v.wage.toLocaleString()}`, rx - 222, 62, { size: 14, weight: 700, color: '#d9e2ec', family: 'pixel' });
+    G.text(ctx, `${v.wage < 0 ? '−' : ''}¥${Math.abs(v.wage).toLocaleString()}`, rx - 222, 62, { size: 14, weight: 700, color: '#d9e2ec', family: 'pixel' });
     const g = v.glances;
     const phoneTxt = g === Infinity ? '∞' : String(g);
     G.sprite(ctx, 'ic_phone', rx - 64, 58, { scale: 0.5, alpha: g === 0 ? 0.35 : 1 });
