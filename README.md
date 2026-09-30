@@ -12,51 +12,41 @@ Build a game prototype that incorporates PCG: generate the levels, or something 
 
 ## What we're building
 
-**Late** (working title): a puzzle game about being late for work. Each day the player has to get from home to the office across a multi-level subway transfer network before clock-in. Along the way they deal with one-way corridors, opposing lanes of foot traffic, escalators that change direction, train timetables, and checkpoints that force them to stand and wait. The whole commute is generated: the network, the station layouts, the timetables, the disruptions, and the checkpoints.
+**Cave Diving** (working title): a game about a solo cave diver in a generated, flooded cave. The player follows a guideline in, reaches a goal, and has to get back out before their air runs out. The tension is deciding when to turn back: every step in costs air, and so does the way out. Kicked-up silt cuts visibility in tight spots, which makes the return harder, and over time the game shows the player less and less of the map.
 
-The game is played over a five-day work week. Difficulty rises through the week by giving the player less information (a timetable shown once and then hidden, signs that go out of date) and by adding checkpoints.
+This is prototype 2. Prototype 1 (a subway transfer game called Late) is developed separately on the `pcg-prototype` branch.
 
-**Status:** design stage. There is no playable prototype yet. Requirements and ideas are in [`idea.md`](idea.md).
+**Status:** design stage. There is no playable prototype yet. The art concept is being made first, with ChatGPT image generation. Requirements and ideas are in [`idea.md`](idea.md).
 
 ## How our PCG works
 
-Every day starts from a seed and a difficulty vector (number of levels, number of transfers, share of one-way corridors, schedule slack, number of checkpoints, and how much information is hidden). The generator then runs a fixed pipeline:
+Every dive starts from a seed and difficulty settings (cave size, number of branches, number of tight squeezes, starting air, and how much information is hidden). The generator is planned as a pipeline:
 
-1. **Network skeleton:** lines and stations laid out on a coarse grid; where lines cross, a transfer station.
-2. **Station interiors:** a floor plan for each level of each transfer station, with stairs, escalators, and lifts linking the levels.
-3. **Corridor rules:** each passage is two-way, one-way, or an opposing-lane corridor; escalator direction follows a schedule.
-4. **Timetables:** headways per line, regular or irregular depending on difficulty.
-5. **Disruptions and checkpoints:** placed on chokepoints that the shortest routes must pass through.
+1. **Cave graph:** a main passage with side branches, loops and dead ends.
+2. **Cave shape:** the graph is turned into passages, squeezes and chambers, and checked for connectivity.
+3. **Goal and guideline:** the goal is placed, and the guideline anchors and junctions are laid out along the main route.
+4. **Conditions:** starting air, visibility and where silt is a problem.
 
-From midweek on, the route also passes through a **hub station**: one where many lines meet and moving between them is awkward (long passages, one-way mazes, separate parts joined by a gate, or many levels). Hubs are generated from several linked blocks with an uneven transfer-cost table, instead of a single floor plan.
+Each generated dive is checked to be winnable (a route to the goal and back exists within the air budget, and the player cannot get permanently trapped) and is regenerated if not; the exact checks will be worked out during implementation.
 
-Each generated day is checked to be winnable (a perfect player can arrive on time with some spare time, and cannot get trapped) and is regenerated if not; the exact checks will be worked out during implementation.
-
-We also add a Director that adjusts disruption and checkpoint intensity from how the player has been doing. It changes parameters only and does not generate space.
-
-Randomness comes from a seeded generator, so the same seed gives the same day.
+Randomness comes from a seeded generator, so the same seed gives the same cave.
 
 ## How PCG adds to our game
 
-- **Variety:** each day is a different network and timetable, so the player cannot memorize a route and has to read the situation.
-- **Controlled difficulty:** difficulty is a set of parameters rather than hand-ordered levels, and the allowed spare time shrinks through the week (Monday is forgiving, Friday is tight).
-- **Fairness:** because each generated day is checked to be winnable, being late is meant to be the player's fault and never the generator's.
-- **Adaptivity:** the Director eases or tightens conditions based on recent performance.
+- **Variety:** each dive is a different cave, so the player cannot memorize a route and has to decide, on the spot, how far to go.
+- **Controlled difficulty:** difficulty is a set of parameters (cave complexity, air margin, how much is shown) rather than hand-ordered levels.
+- **Fairness:** because each generated dive is checked to be winnable, a failed dive is meant to come from the player's decisions and not from an impossible cave.
+- **Adaptivity (optional):** a Director-style layer could ease or tighten conditions based on recent performance.
 
-What is not procedural: the rules, the items, the art, and the text templates are hand-made. Hiding information from the player (the timetable shown once, out-of-date signs) is a difficulty setting in how the game is displayed, not generated content.
+What is not procedural: the rules, the art, and the text templates are hand-made. Hiding information from the player (the map shown once, then only the line and the lamp) is a difficulty setting in how the game is displayed, not generated content.
 
-## Telemetry and leaderboard (planned)
+## Art
 
-Following our Week 3 game ([`game-design-projects/week3`](https://github.com/game-design-projects/week3)), we plan to add:
-
-- **Anonymous, opt-in telemetry.** Sessions are recorded locally first. Only if the player agrees on a first-run card are finished sessions sent to a small Cloudflare Worker that stores them in a D1 database. The Worker does not read or store IP address, User-Agent or location; the only identifier is a random id kept in the browser. Each record includes the seed, so a generated day can be reproduced and used to check how hard it really is.
-- **Leaderboard.** Because a day is fully determined by its seed, a player submits the seed and their actions, and the Worker regenerates the day and replays them to work out the score, instead of trusting the client. Submitting is the player's consent, and only a nickname is shown.
-
-The game stays fully playable offline or with both turned off. Details are in [`idea.md`](idea.md).
+The art concept and sprite sheets are made first with ChatGPT image generation and kept separate from the game code, in `resources/`. The direction so far is 2D, flat-shaded, in teal, ink blue and slate grey, with amber reserved for the guideline and the diver's lamp.
 
 ## How to run
 
-The prototype is not implemented yet. The plan is a static web page with no build step: open `index.html` in a browser. rot.js (2.2.1) may be vendored into the repo for its seeded RNG and map generators. Telemetry and the leaderboard would need our own Worker and D1 database, deployed separately with wrangler; the game itself does not depend on them.
+The prototype is not implemented yet. The plan is a static web page with no build step: open `index.html` in a browser. rot.js (2.2.1) may be vendored into the repo for its seeded RNG and map generators.
 
 ## Research notes
 
