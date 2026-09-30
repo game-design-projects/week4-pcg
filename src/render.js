@@ -202,6 +202,11 @@
     const k = Math.min(1, dt * 3);
     this.cam.x += (tx - this.cam.x) * k; this.cam.y += (ty - this.cam.y) * k;
     const halfW = this.w / 2 / this.px, halfH = this.h / 2 / this.px;
+    // Keep the view on the cave: at most a few cells of solid rock past the
+    // grid's sides and bottom, and a view of the sky above the pool.
+    const clampAxis = (c, half, lo, hi) => (hi - lo <= 2 * half ? (lo + hi) / 2 : clamp(c, lo + half, hi - half));
+    this.cam.x = clampAxis(this.cam.x, halfW, -4, d.W + 4);
+    this.cam.y = clampAxis(this.cam.y, halfH, -16, d.H + 4);
     const vx0 = this.cam.x - halfW - 2, vx1 = this.cam.x + halfW + 2, vy0 = this.cam.y - halfH - 2, vy1 = this.cam.y + halfH + 2;
     if (g.siltDirty) this.updateSilt();
 
@@ -328,13 +333,17 @@
 
   Renderer.prototype.drawLines = function (ctx) {
     const g = this.game, a = g.d.anchor;
-    // The tie-off post in the pool, standing on the pool floor.
+    // The tie-off post in the pool: a steel stake on the pool floor with an eye
+    // at the top. Amber is kept for line, so the post can't be mistaken for one.
     let floor = a.y;
     while (floor < a.y + 12 && g.isOpen(a.x, floor + 0.5)) floor += 0.5;
-    ctx.fillStyle = '#5c4a2c';
-    ctx.fillRect(a.x - 0.14, a.y, 0.28, floor - a.y + 0.4);
-    ctx.strokeStyle = AMBER; ctx.lineWidth = 0.12;
-    ctx.beginPath(); ctx.arc(a.x, a.y, 0.4, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#26343b'; ctx.fillRect(a.x - 0.2, a.y + 0.3, 0.4, floor - a.y + 0.2);
+    ctx.fillStyle = '#9fb2b9'; ctx.fillRect(a.x - 0.12, a.y + 0.3, 0.24, floor - a.y + 0.2);
+    ctx.fillStyle = '#26343b'; ctx.fillRect(a.x - 0.5, floor + 0.2, 1, 0.3);   // its foot
+    ctx.strokeStyle = '#26343b'; ctx.lineWidth = 0.24;
+    ctx.beginPath(); ctx.arc(a.x, a.y, 0.36, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = '#dce8ea'; ctx.lineWidth = 0.11;
+    ctx.beginPath(); ctx.arc(a.x, a.y, 0.36, 0, Math.PI * 2); ctx.stroke();
 
     ctx.lineJoin = 'round';
     g.lines.forEach((line, i) => {
@@ -573,6 +582,20 @@
     }
     if (g.tutorial) this.drawTutorial(ctx);
 
+    // Until the reel is tied in at the pool, label the post so it's easy to find.
+    if (!g.lines.some((l) => l.anchored)) {
+      const a = d.anchor, sx = this.w / 2 + (a.x - this.cam.x) * this.px, sy = this.h / 2 + (a.y - this.cam.y) * this.px;
+      if (sx > 40 && sx < this.w - 40 && sy > 60 && sy < this.h - 20) {
+        ctx.font = '700 11px system-ui, -apple-system, Segoe UI, sans-serif';
+        ctx.textAlign = 'center';
+        const label = 'TIE-OFF POST \u00b7 R', tw = ctx.measureText(label).width + 14;
+        panel(ctx, sx - tw / 2, sy - this.px * 0.6 - 30, tw, 20);
+        ctx.fillStyle = '#dce8ea';
+        ctx.fillText(label, sx, sy - this.px * 0.6 - 16);
+        ctx.textAlign = 'left';
+      }
+    }
+
     // Dive info, bottom right.
     ctx.font = '600 12px system-ui, -apple-system, Segoe UI, sans-serif';
     ctx.textAlign = 'right';
@@ -723,8 +746,8 @@
       ctx.beginPath(); ctx.moveTo(s0 + 0.2, 0.5); ctx.lineTo(s1 + 0.8, 0.5); ctx.stroke();
     }
 
-    // The tie-off post.
-    ctx.strokeStyle = AMBER; ctx.lineWidth = 0.6;
+    // The tie-off post (white; amber on the survey is only ever your line).
+    ctx.strokeStyle = '#eef6f7'; ctx.lineWidth = 0.6;
     ctx.beginPath(); ctx.arc(d.anchor.x, d.anchor.y, 1.4, 0, Math.PI * 2); ctx.stroke();
 
     ctx.fillStyle = '#ffd48a';

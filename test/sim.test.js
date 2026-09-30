@@ -73,3 +73,26 @@ test('the simulation avoids engine-dependent math', () => {
     assert.doesNotMatch(code, /Math\.(sin|cos|tan|atan2?|exp|log|pow|hypot|random)\b/, f);
   }
 });
+
+test('the tutorial keeps its steps in order', () => {
+  // Swim straight to the end chamber without tying in: it doesn't count yet.
+  const d = Gen.generate('5N6K3G', 0);
+  const g = new Game(d, 'full');
+  const said = [], toast = g.toast.bind(g);
+  g.toast = (text, secs) => { said.push(text); toast(text, secs); };
+  const steer = (t) => { const dx = t.x - g.diver.x, dy = t.y - g.diver.y, l = Math.hypot(dx, dy) || 1; g.update(STEP, { x: dx / l, y: dy / l }); };
+  for (let i = 0; i < 400; i++) steer(d.anchor);
+  let j = 0;
+  for (let i = 0; i < 60 * 120 && Math.hypot(d.goal.x - g.diver.x, d.goal.y - g.diver.y) > 1.5; i++) {
+    while (j < d.route.length - 1 && Math.hypot(d.route[j].x - g.diver.x, d.route[j].y - g.diver.y) < 1.5) j++;
+    steer(d.route[Math.min(j + 3, d.route.length - 1)]);
+  }
+  assert.ok(Math.hypot(d.goal.x - g.diver.x, d.goal.y - g.diver.y) <= 1.5, 'reached the end chamber');
+  assert.equal(g.goalTagged, false);
+  assert.equal(g.tutorial.step, 0);
+  assert.ok(said.some((t) => /Tie your reel in first/.test(t)), 'reminded to tie in');
+  // Played in order, the tutorial completes.
+  const { g: ok } = run('5N6K3G', 0, {});
+  assert.equal(ok.done.outcome, 'exit');
+  assert.equal(ok.tutorial.step, ok.tutorial.steps.length - 1);
+});

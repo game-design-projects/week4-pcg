@@ -25,14 +25,19 @@
   const fmt = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
   // Level 0: learn to lay a line in and follow it out.
+  // hint: what the step still needs, for the reminders.
   const TUTORIAL = [
-    { text: 'Swim down to the amber tie-off post in the pool and press R to tie your reel in.',
+    { text: 'Swim down to the tie-off post in the pool and press R to tie your reel in.',
+      hint: 'tie your reel in at the post in the pool (R)',
       done: (g) => g.reel.active !== null && g.lines[g.reel.active].anchored },
     { text: 'Swim into the cave. The reel pays out line behind you. If you back up, it reels the line back in.',
+      hint: 'swim into the cave, laying line from the post',
       done: (g) => g.laidMetres() >= 12 },
     { text: 'Follow the passage to the chamber at the end.',
+      hint: 'follow the passage to the end chamber',
       done: (g) => g.goalTagged },
     { text: 'Press R to tie your line off here, so it stays in place.',
+      hint: 'tie your line off in the end chamber (R)',
       done: (g) => g.reel.active === null && g.lines.some((l) => l.fixed && l.anchored) },
     { text: 'Silt-out! You can’t see a thing. Hold Space to take hold of your line and follow it back to the pool.',
       enter: (g) => g.siltOut() },
@@ -623,14 +628,15 @@
       this.felt = { x: p.x, y: p.y, ex: p.ex, ey: p.ey, out: this.connected(this.hold.line) };
     }
 
-    if (!this.goalTagged && hyp(d.x - dive.goal.x, d.y - dive.goal.y) < 3.2) {
+    // In the tutorial the end chamber only counts once its step comes up, so the steps stay in order.
+    const tu = this.tutorial;
+    if (!this.goalTagged && (!tu || tu.step >= 2) && hyp(d.x - dive.goal.x, d.y - dive.goal.y) < 3.2) {
       this.goalTagged = true;
       this.event('goal', `Reached the end chamber and tagged it, ${Math.round(this.pen)} m in.`);
       this.toast(this.tutorial ? 'You made it to the end chamber.' : 'End chamber: tagged. Now follow your line home.', 5);
     }
 
     // Tutorial steps.
-    const tu = this.tutorial;
     if (tu && tu.step < tu.steps.length - 1 && tu.steps[tu.step].done(this)) {
       tu.step++;
       const next = tu.steps[tu.step];
@@ -638,10 +644,16 @@
       this.event('tutorial', `Tutorial step ${tu.step + 1}: ${next.text}`);
     }
 
+    // Heading into the tutorial cave without tying in: remind, every few seconds.
+    if (tu && tu.step === 0 && this.entered && !this.inExitZone() && this.t - (this.flags.tutorialNag || -9) > 6) {
+      this.flags.tutorialNag = this.t;
+      this.toast('Tie your reel in first: go back to the post in the pool and press R.');
+    }
+
     if (this.gas <= 0) return this.finish('out_of_gas');
     if (this.entered && this.inExitZone()) {
       if (tu && tu.step < tu.steps.length - 1) {
-        if (this.t - (this.flags.tutorialNag || -9) > 4) { this.flags.tutorialNag = this.t; this.toast('Finish the tutorial steps first: head back into the cave.'); }
+        if (this.t - (this.flags.tutorialNag || -9) > 4) { this.flags.tutorialNag = this.t; this.toast(`Not yet: ${tu.steps[tu.step].hint}.`); }
       } else {
         return this.finish('exit');
       }
