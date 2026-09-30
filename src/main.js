@@ -18,12 +18,14 @@
   }
   let progress = loadProgress();
 
-  // Between dives only: success tightens the next cave, running out of gas eases it.
-  // Turning back safely without the goal keeps the level where it is.
+  // Between dives only: finishing the tutorial unlocks level 1; after that,
+  // success tightens the next maze and running out of gas eases it. Turning
+  // back safely without the goal keeps the level where it is.
   function direct(result) {
     const before = progress.level;
-    if (result.outcome === 'exit' && result.goal) progress.level = Math.min(12, progress.level + 1);
-    else if (result.outcome === 'out_of_gas') progress.level = Math.max(0, progress.level - 1);
+    if (current.level === 0) { if (result.outcome === 'exit') progress.level = Math.max(progress.level, 1); }
+    else if (result.outcome === 'exit' && result.goal) progress.level = Math.min(12, progress.level + 1);
+    else if (result.outcome === 'out_of_gas') progress.level = Math.max(1, progress.level - 1);
     progress.dive += 1;
     progress.history.push({ seed: current.seed, level: current.level, outcome: result.outcome, goal: result.goal, gas: Math.round(result.gas) });
     progress.history = progress.history.slice(-30);
@@ -32,7 +34,7 @@
   }
 
   // Less information as the diver improves: full survey, then entrance only, then none.
-  const autoMap = (level) => (level <= 1 ? 'full' : level <= 3 ? 'entrance' : 'none');
+  const autoMap = (level) => (level <= 2 ? 'full' : level <= 4 ? 'entrance' : 'none');
 
   // ------------------------------------------------------------------ state
   const canvas = $('game');
@@ -50,7 +52,7 @@
     mode = id || 'dive';
   }
   function updateTitle() {
-    $('progress').textContent = `Dive ${progress.dive} · level ${progress.level}`;
+    $('progress').textContent = progress.level === 0 ? 'Starts with the tutorial' : `Dive ${progress.dive} · level ${progress.level}`;
   }
 
   function plan(seed, level, mapMode) {
@@ -71,26 +73,33 @@
 
   function showBrief() {
     const d = current.dive, m = d.measures, B = d.budget;
-    $('brief-title').textContent = `Dive ${progress.dive}: plan`;
-    $('brief-facts').innerHTML = [
+    $('brief-title').textContent = d.tutorial ? 'Level 0: laying a guideline' : `Dive ${progress.dive}: plan`;
+    $('brief-facts').innerHTML = (d.tutorial ? [
       fact(`${B.P0} bar`, 'starting gas'),
       fact(`${Math.round(B.turn)} bar`, 'turn pressure (one third used)'),
-      fact(`${m.lineLength} m`, 'main line to the end'),
-      fact(`${m.maxDepth} m`, 'deepest point on the line'),
+      fact(`${m.reelLength} m`, 'line on your reel'),
+      fact('R', 'tie the reel in, and tie it off'),
+      fact('Space', 'hold the line and follow it'),
+    ] : [
+      fact(`${B.P0} bar`, 'starting gas'),
+      fact(`${Math.round(B.turn)} bar`, 'turn pressure (one third used)'),
+      fact(`${m.reelLength} m`, 'line on your reel'),
+      fact(`${m.junctions}`, 'junctions in the maze'),
+      fact(`${m.deadEnds}`, 'dead ends'),
       fact(`${Math.round(d.params.visibility * Gen.C.CELL_M)} m`, 'lamp reach in clear water'),
-      fact(`${m.tightMetres} m`, 'tight passage on the line'),
-      fact(`${m.branches}`, `side leads (${m.linedBranches} with a line)`),
-      fact(`${d.seed} · L${d.level}`, 'seed · level'),
-    ].join('');
+      fact(`${d.seed} \u00b7 L${d.level}`, 'seed \u00b7 level'),
+    ]).join('');
     const box = $('brief-map');
     box.innerHTML = '';
     if (current.mapMode === 'none') {
-      $('brief-note').textContent = 'No survey for this cave. You have the line, your lamp, and whatever you remember.';
+      $('brief-note').textContent = 'No survey for this cave. Lay your line from the post in the pool and find the way through.';
     } else {
       box.appendChild(renderSurvey(d, 4));
-      $('brief-note').textContent = current.mapMode === 'full'
-        ? 'You carry this survey: press M in the water to check it. Reading it costs time, and time is gas.'
-        : 'Study the survey now. It stays at the entrance: once you leave the pool, you are on your own.';
+      $('brief-note').textContent = d.tutorial
+        ? 'A short cave to learn the reel: tie in at the post in the pool, lay line to the end chamber, tie off, then follow the line out when the cave silts up.'
+        : current.mapMode === 'full'
+          ? 'You carry this survey: press M in the water to check it. It shows the passages, not the way through, and reading it costs time.'
+          : 'Study the survey now. It stays at the entrance: once you leave the pool, you have your line, your lamp and your memory.';
     }
     $('brief-note').textContent += ` Generated in ${current.genMs} ms${d.attempts > 1 ? `, after ${d.attempts - 1} rejected ${d.attempts === 2 ? 'cave' : 'caves'} (${d.rejected.join('; ')})` : ', passed the fairness check first time'}.`;
     show('brief');
@@ -111,14 +120,15 @@
   function showResult() {
     const res = game.done, pm = game.postMortem();
     const titles = { exit: res.goal ? 'Dive complete' : 'Turned back, home safe', out_of_gas: 'Out of gas', abort: 'Dive ended' };
-    $('result-title').textContent = titles[res.outcome];
+    $('result-title').textContent = res.tutorial && res.outcome === 'exit' ? 'Tutorial complete' : titles[res.outcome];
     $('result-headline').textContent = pm.headline;
     $('result-stats').innerHTML = [
       fact(pm.stats.time, 'dive time'),
       fact(`${pm.stats.maxPen} m`, 'furthest from the entrance'),
       fact(`${pm.stats.gas} bar`, 'gas left'),
       fact(`${pm.stats.zeroVis} s`, 'in zero visibility'),
-      fact(`${res.surveyed}/${res.leads}`, 'leads surveyed'),
+      fact(`${pm.stats.laid} m`, 'line laid'),
+      fact(`${res.deadEnds}`, 'dead ends found'),
       fact(pm.stats.score, 'score'),
     ].join('');
     $('result-notes').innerHTML = pm.notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('');
@@ -131,8 +141,9 @@
       next = `The level is set by hand to ${current.level} in the dive options.`;
     } else if (res.outcome !== 'abort') {
       const change = direct(res);
-      next = change > 0 ? `Next cave: level ${progress.level}, a little longer, deeper and siltier.`
-        : change < 0 ? `Next cave: level ${progress.level}, a little easier.` : `Next cave stays at level ${progress.level}.`;
+      next = current.level === 0 ? (res.outcome === 'exit' ? 'Next: level 1, your first maze.' : 'Try the tutorial again.')
+        : change > 0 ? `Next maze: level ${progress.level}, bigger, deeper and siltier.`
+        : change < 0 ? `Next maze: level ${progress.level}, a little easier.` : `Next maze stays at level ${progress.level}.`;
       const was = autoMap(progress.level - change), now = autoMap(progress.level);
       if ($('opt-map').value === 'auto' && was !== now) next += now === 'full' ? ' You get the full survey back.' : now === 'entrance' ? ' From now on the survey stays at the entrance.' : ' From now on there is no survey at all.';
     }
@@ -152,7 +163,7 @@
     keys.add(e.code);
     if (mode === 'dive') {
       if (e.code === 'Escape' || e.code === 'KeyP') show('pause');
-      else if (e.code === 'KeyR') game.toggleSpool();
+      else if (e.code === 'KeyR') game.toggleReel();
       else if (e.code === 'KeyH') ui.showHelp = !ui.showHelp;
       else if (e.code === 'KeyM') {
         if (ui.showMap) ui.showMap = false;

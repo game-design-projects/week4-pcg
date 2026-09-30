@@ -12,7 +12,7 @@
   <section id="title" class="screen title">
     <div class="card">
       <h1>Cave Diving</h1>
-      <p class="tag">A generated flooded cave, one guideline, and a third of your gas for the way in.</p>
+      <p class="tag">A generated flooded maze, a reel of line, and a third of your gas for the way in.</p>
       <div class="row">
         <button id="start" class="primary">Start dive</button>
         <span id="progress" class="muted"></span>
@@ -24,7 +24,7 @@
           <label>Level
             <select id="opt-level">
               <option value="auto">Auto (adapts to you)</option>
-              <option>0</option><option>1</option><option>2</option><option>3</option><option>4</option>
+              <option value="0">0 (tutorial)</option><option>1</option><option>2</option><option>3</option><option>4</option>
               <option>5</option><option>6</option><option>7</option><option>8</option><option>9</option>
             </select>
           </label>
@@ -42,13 +42,13 @@
       <details>
         <summary>How to play</summary>
         <ul class="howto">
-          <li>Follow the amber guideline in, reach the end of the line in the far chamber, and get back to the entrance pool before your gas runs out.</li>
-          <li>You start with 200 bar. Turn for home when a third is gone: the gauge marks the turn pressure. Every cave is checked so that turning there from the main line leaves enough gas to get out, even feeling your way along the line blind.</li>
+          <li>Find your way through a generated flooded maze to the end chamber, then get back to the entrance pool before your gas runs out. The first dive is a tutorial.</li>
+          <li>No one has laid a line for you. Tie your reel in at the post in the pool (R) and it pays out line as you swim. Swim back over it and it reels back in, so dead ends don't leave a tangle. Press R again to tie it off.</li>
+          <li>You start with 200 bar. Turn for home when a third is gone: the gauge marks the turn pressure. If your line runs unbroken from the pool and you turn there, you always have the gas to follow it out, even blind.</li>
           <li>Kicking hard, bumping rock and squeezing through tight spots stir up silt. It hangs in the water for a long time, so the mess you make on the way in is waiting for you on the way out.</li>
-          <li>Hold Space near the line to keep a hand on it. In zero visibility it is the only reliable way out, and the arrows on it, which you can feel, point toward the exit.</li>
-          <li>Side passages end in unsurveyed leads, worth points if you get home. Some have their own line across a gap. You carry one 30 m spool (R) to bridge a gap or to leave a line behind you.</li>
+          <li>Hold Space near a line to keep a hand on it. In zero visibility it is the only reliable way out. The arrow shows which way it runs back.</li>
         </ul>
-        <p class="muted">WASD / arrows: swim · Shift: kick hard · Space (hold): hold the line · R: spool · M: map · H: controls · Esc: pause</p>
+        <p class="muted">WASD / arrows: swim · Shift: kick hard · R: tie the reel in / off · Space (hold): follow a line · M: map · H: controls · Esc: pause</p>
       </details>
     </div>
   </section>

@@ -16,7 +16,7 @@ for (let i = 0; same && i < a.open.length; i++) if (a.open[i] !== b.open[i] || a
 console.log('deterministic:', same ? 'yes' : 'NO');
 
 const mean = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length;
-console.log('\nlevel | first-try pass | attempts (mean/max) | line m | penetration m | max depth m | tight m | leads | lined | gas to goal | ms');
+console.log('\nlevel | first-try pass | attempts (mean/max) | route m | winding | reel m | max depth m | tight m | junctions | dead ends | gas to goal | ms');
 const reasons = {};
 for (let L = 0; L <= maxLevel; L++) {
   const rows = [];
@@ -32,12 +32,12 @@ for (let L = 0; L <= maxLevel; L++) {
     }
   }
   const ms = (Date.now() - t0) / perLevel;
-  const m = (f) => mean(rows.map((d) => d.measures[f])).toFixed(0);
+  const m = (f, dp = 0) => mean(rows.map((d) => d.measures[f])).toFixed(dp);
   console.log([
     L,
     `${((rows.filter((d) => d.attempts === 1).length / perLevel) * 100).toFixed(0)}%`,
     `${mean(rows.map((d) => d.attempts)).toFixed(2)}/${Math.max(...rows.map((d) => d.attempts))}`,
-    m('lineLength'), m('penetration'), m('maxDepth'), m('tightMetres'), m('branches'), m('linedBranches'), m('gasToGoal'),
+    m('routeLength'), m('winding', 2), m('reelLength'), m('maxDepth'), m('tightMetres'), m('junctions', 1), m('deadEnds', 1), m('gasToGoal'),
     ms.toFixed(0) + (failed ? ` (${failed} gave up)` : ''),
   ].join(' | '));
 }

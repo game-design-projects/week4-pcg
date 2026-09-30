@@ -1,7 +1,7 @@
 // Drawing: cave walls, silt, lines, diver, the lamp, the HUD, and the survey map.
 (function (root) {
   'use strict';
-  const Gen = root.CaveGen, C = Gen.C, TAG = Gen.TAG;
+  const Gen = root.CaveGen, C = Gen.C;
 
   const SPRITE_PX = 50;     // diver sprite pixels per cell
   const PROP_PX = 30;       // prop sprite pixels per cell
@@ -230,7 +230,7 @@
     }
 
     this.drawProps(ctx, vx0, vx1, vy0, vy1);
-    this.drawLines(ctx, g.lines, 1);
+    this.drawLines(ctx);
     this.drawGoal(ctx);
     this.drawBubbles(ctx);
     this.drawPuffs(ctx);
@@ -283,28 +283,33 @@
     }
   };
 
-  Renderer.prototype.drawLines = function (ctx, lines, alpha) {
-    const g = this.game;
-    ctx.globalAlpha = alpha;
+  Renderer.prototype.drawLines = function (ctx) {
+    const g = this.game, a = g.d.anchor;
+    // The tie-off post in the pool, standing on the pool floor.
+    let floor = a.y;
+    while (floor < a.y + 12 && g.isOpen(a.x, floor + 0.5)) floor += 0.5;
+    ctx.fillStyle = '#5c4a2c';
+    ctx.fillRect(a.x - 0.14, a.y, 0.28, floor - a.y + 0.4);
+    ctx.strokeStyle = AMBER; ctx.lineWidth = 0.12;
+    ctx.beginPath(); ctx.arc(a.x, a.y, 0.4, 0, Math.PI * 2); ctx.stroke();
+
     ctx.lineJoin = 'round';
-    for (const line of lines) {
-      ctx.strokeStyle = line.kind === 'spool' ? '#f6c566' : AMBER;
+    g.lines.forEach((line, i) => {
+      const live = i === g.reel.active;
+      ctx.strokeStyle = AMBER;
       ctx.lineWidth = 0.1;
       ctx.beginPath();
-      line.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-      if (line === g.spool.line && !g.spool.used) ctx.lineTo(g.diver.x, g.diver.y);
+      line.pts.forEach((p, k) => (k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      if (live && !g.hold) ctx.lineTo(g.diver.x, g.diver.y);   // still running off the reel
       ctx.stroke();
+      // Knots where the line is tied in and tied off.
       ctx.fillStyle = '#c9822a';
-      for (let i = 0; i < line.pts.length; i++) {
-        if (line.kind === 'spool' && i > 0 && i < line.pts.length - 1) continue;
-        ctx.beginPath(); ctx.arc(line.pts[i].x, line.pts[i].y, 0.16, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-    for (const m of g.d.markers) drawArrow(ctx, m.x, m.y, m.ex, m.ey, 0.55, AMBER);
-    ctx.globalAlpha = 1;
+      const ends = live ? [line.pts[0]] : [line.pts[0], line.pts[line.pts.length - 1]];
+      for (const p of ends) { ctx.beginPath(); ctx.arc(p.x, p.y, 0.18, 0, Math.PI * 2); ctx.fill(); }
+    });
   };
 
-  // A line arrow: a small triangle on the line pointing toward the exit.
+  // A small triangle pointing along (ex, ey).
   function drawArrow(ctx, x, y, ex, ey, size, color) {
     ctx.save();
     ctx.translate(x, y);
@@ -427,7 +432,7 @@
     }
   };
 
-  // What the diver can feel: the line under the hand and any arrow on it.
+  // What the diver can feel: the line under the hand, and which way it runs back.
   Renderer.prototype.drawFelt = function (ctx) {
     const g = this.game;
     this.worldTransform(ctx, 1);
@@ -444,14 +449,11 @@
       ctx.stroke();
       ctx.restore();
     }
-    if (g.felt) {
-      const m = g.felt;
-      drawArrow(ctx, m.x, m.y, m.ex, m.ey, 0.7, '#ffc46b');
-      // Direction to the exit, as the diver reads it off the arrow.
-      const dv = g.diver;
+    if (g.felt && g.hold.s > 0.5) {
+      const m = g.felt, dv = g.diver;
       ctx.save();
       ctx.globalAlpha = 0.85;
-      drawArrow(ctx, dv.x + m.ex * 2.4, dv.y - 1.8 + m.ey * 0.8, m.ex, m.ey, 0.6, '#ffe0a8');
+      drawArrow(ctx, dv.x + m.ex * 2.4, dv.y - 1.8 + m.ey * 0.8, m.ex, m.ey, 0.6, m.out ? '#ffe0a8' : '#ff8a6a');
       ctx.restore();
     }
   };
@@ -484,30 +486,36 @@
     ctx.fillStyle = '#cfe0e3';
     ctx.fillText(`DEPTH ${g.depth().toFixed(0)} m`, x, y + 52);
     ctx.fillText(`TIME ${root.CaveGame.fmt(g.t)}`, x + 100, y + 52);
+    // The reel, with how much line is left on it.
+    const reelM = Math.max(0, Math.round(g.reel.left * C.CELL_M));
+    if (this.art.spool) ctx.drawImage(this.art.spool, x + 184, y + 36, 22, 19);
+    ctx.fillText(`${reelM} m`, x + 210, y + 52);
     const chips = [];
     if (g.hold) chips.push(['ON LINE', AMBER]);
-    if (g.spool.line && !g.spool.used) chips.push([`SPOOL ${Math.max(0, Math.round(g.spool.left * C.CELL_M))} m left`, '#f6c566']);
-    else if (!g.spool.used) chips.push(['SPOOL READY', '#8fa9b1']);
+    if (g.reel.active !== null) chips.push(['LAYING LINE', '#f6c566']);
+    const lineIdx = g.hold ? g.hold.line : g.reel.active;
+    if (lineIdx !== null && lineIdx !== undefined && !g.connected(lineIdx)) chips.push(['NOT TIED TO THE ENTRANCE', '#ff8a6a']);
+    else if (lineIdx === null && g.entered && !g.nearestLine(g.diver.x, g.diver.y, 4)) chips.push(['NO LINE', '#ff8a6a']);
     if (g.diver.tight) chips.push(['TIGHT', '#c9d6da']);
     if (g.lamp.vis < root.CaveGame.ZERO_VIS) chips.push(['ZERO VIS', '#ff8a6a']);
     if (g.goalTagged) chips.push(['END TAGGED', '#ffd48a']);
-    const leads = g.leads.filter((l) => l.reachable);
-    if (leads.length) chips.push([`LEADS ${leads.filter((l) => l.surveyed).length}/${leads.length}`, '#9fd1c8']);
-    let cx = x;
+    let cx = x, cy = y + 60;
     ctx.font = '700 11px system-ui, -apple-system, Segoe UI, sans-serif';
     for (const [text, color] of chips) {
       const tw = ctx.measureText(text).width + 12;
-      if (cx + tw > x + w + 4) break;
+      if (cx > x && cx + tw > x + w + 4) { cx = x; cy += 22; }
+      ctx.fillStyle = 'rgba(6,16,24,0.62)'; ctx.fillRect(cx, cy, tw, 18);
       ctx.strokeStyle = color; ctx.lineWidth = 1;
-      ctx.strokeRect(cx + 0.5, y + 60.5, tw, 17);
-      ctx.fillStyle = color; ctx.fillText(text, cx + 6, y + 73);
+      ctx.strokeRect(cx + 0.5, cy + 0.5, tw, 17);
+      ctx.fillStyle = color; ctx.fillText(text, cx + 6, cy + 13);
       cx += tw + 6;
     }
     if (g.felt) {
       ctx.font = '600 13px system-ui, -apple-system, Segoe UI, sans-serif';
-      ctx.fillStyle = '#ffe0a8';
-      ctx.fillText(`Line arrow under your hand: exit is ${g.felt.ex < 0 ? 'back to the left' : 'to the right'}.`, x, y + 102);
+      ctx.fillStyle = g.felt.out ? '#ffe0a8' : '#ff8a6a';
+      ctx.fillText(g.felt.out ? 'Hand on the line: the arrow shows the way back to the entrance.' : 'Hand on a line that does not lead back to the entrance.', x, cy + 42);
     }
+    if (g.tutorial) this.drawTutorial(ctx);
 
     // Dive info, bottom right.
     ctx.font = '600 12px system-ui, -apple-system, Segoe UI, sans-serif';
@@ -518,8 +526,8 @@
     ctx.textAlign = 'left';
 
     if (ui.showHelp) {
-      const lines = ['WASD / arrows: swim', 'Shift: kick hard (fast, costly, silty)', 'Space (hold): hold the line', 'R: tie in / tie off the jump spool', 'M: map · Esc: pause'];
-      panel(ctx, 8, this.h - 24 - lines.length * 18, 290, lines.length * 18 + 14);
+      const lines = ['WASD / arrows: swim', 'Shift: kick hard (fast, costly, silty)', 'R: tie your reel in / tie it off', 'Space (hold): follow a line by touch', 'M: map \u00b7 H: hide this \u00b7 Esc: pause'];
+      panel(ctx, 8, this.h - 24 - lines.length * 18, 300, lines.length * 18 + 14);
       ctx.fillStyle = '#cfe0e3';
       lines.forEach((t, i) => ctx.fillText(t, 18, this.h - 14 - (lines.length - 1 - i) * 18 - 4));
     }
@@ -551,30 +559,57 @@
     ctx.fill(); ctx.stroke();
   }
 
+  Renderer.prototype.drawTutorial = function (ctx) {
+    const tu = this.game.tutorial, step = tu.steps[tu.step];
+    const w = Math.min(620, this.w - 340), x = (this.w - w) / 2 + 60, y = 16;
+    ctx.font = '600 15px system-ui, -apple-system, Segoe UI, sans-serif';
+    const words = step.text.split(' '), rows = [];
+    let row = '';
+    for (const word of words) {
+      const t = row ? row + ' ' + word : word;
+      if (ctx.measureText(t).width > w - 28 && row) { rows.push(row); row = word; } else row = t;
+    }
+    rows.push(row);
+    panel(ctx, x, y, w, 36 + rows.length * 20);
+    ctx.fillStyle = '#ffc46b';
+    ctx.font = '700 12px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.fillText(`TUTORIAL \u00b7 STEP ${tu.step + 1} OF ${tu.steps.length}`, x + 14, y + 20);
+    ctx.fillStyle = '#f2e6cf';
+    ctx.font = '600 15px system-ui, -apple-system, Segoe UI, sans-serif';
+    rows.forEach((r, i) => ctx.fillText(r, x + 14, y + 42 + i * 20));
+  };
+
   Renderer.prototype.drawMapOverlay = function (ctx) {
-    const g = this.game, m = this.map;
+    const g = this.game, m = this.map, d = g.d;
     ctx.fillStyle = 'rgba(2,8,14,0.78)';
     ctx.fillRect(0, 0, this.w, this.h);
     const s = Math.min((this.w - 60) / m.width, (this.h - 110) / m.height);
     const w = m.width * s, h = m.height * s, x = (this.w - w) / 2, y = (this.h - h) / 2 + 10;
     ctx.drawImage(m, x, y, w, h);
+    const X = (wx) => x + (wx / d.W) * w, Y = (wy) => y + ((wy - m.cropY0) / m.cropH) * h;
+    // Your own lines, as laid so far.
+    ctx.strokeStyle = AMBER; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    g.lines.forEach((line, i) => {
+      ctx.beginPath();
+      line.pts.forEach((p, k) => (k ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y))));
+      if (i === g.reel.active && !g.hold) ctx.lineTo(X(g.diver.x), Y(g.diver.y));
+      ctx.stroke();
+    });
     ctx.fillStyle = '#e8f1f2';
     ctx.font = '700 16px system-ui, -apple-system, Segoe UI, sans-serif';
-    ctx.fillText(`Survey · seed ${g.d.seed}`, x, y - 14);
+    ctx.fillText(`Survey \u00b7 seed ${d.seed}`, x, y - 14);
     ctx.font = '600 12px system-ui, -apple-system, Segoe UI, sans-serif';
     ctx.fillStyle = '#9fb7bf';
-    ctx.fillText('Solid: surveyed passage · dashed: unsurveyed leads · amber: guideline, arrows point out, dashes are jumps', x, y + h + 22);
-    if (g.mapMode === 'full' || g.mapAllowed()) {
-      const px = x + (g.diver.x / g.d.W) * w, py = y + ((g.diver.y - m.cropY0) / m.cropH) * h;
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = AMBER; ctx.lineWidth = 2; ctx.stroke();
-    }
+    ctx.fillText('The survey shows the passages, not the way. Ring: tie-off post \u00b7 square: end chamber \u00b7 amber: the line you have laid', x, y + h + 22);
+    const px = X(g.diver.x), py = Y(g.diver.y);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = AMBER; ctx.lineWidth = 2; ctx.stroke();
   };
 
   // ------------------------------------------------------------------ survey map
-  // Drawn in the style of resources/cave_concept_2.png: surveyed passage filled
-  // in depth bands, unsurveyed passage as faint dashed outlines, the line in amber.
+  // Drawn in the style of resources/cave_concept_2.png: passages filled in depth
+  // bands, with the tie-off post and the end chamber marked. No line: the diver lays it.
   function renderSurvey(d, scale) {
     // Crop to the rows the cave actually uses.
     let minY = d.H, maxY = 0;
@@ -592,23 +627,11 @@
     for (let y = 0; y < cv.height; y += 10 * scale) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cv.width, y); ctx.stroke(); }
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
 
-    const N = d.W * d.H, surveyed = new Uint8Array(N), unsurveyed = new Uint8Array(N);
-    for (let i = 0; i < N; i++) {
-      if (!d.open[i]) continue;
-      if (d.tag[i] === TAG.BRANCH || d.tag[i] === TAG.LOOP) unsurveyed[i] = 1; else surveyed[i] = 1;
-    }
+    const N = d.W * d.H;
     const inv = (f) => { for (let i = 0; i < f.length; i++) f[i] = 1 - f[i]; return f; };
 
-    // Unsurveyed passage: faint dashed outline only.
-    const un = new Path2D();
-    contour(inv(smoothField(unsurveyed, d.W, d.H)), d.W, d.H, 0, 0, d.W, d.H, 0.5, null, un);
-    ctx.setLineDash([0.9, 0.7]);
-    ctx.strokeStyle = 'rgba(150,180,195,0.5)'; ctx.lineWidth = 0.35;
-    ctx.stroke(un);
-    ctx.setLineDash([]);
-
-    // Surveyed passage: depth bands (lighter = shallower), lighter near the walls.
-    const sf = inv(smoothField(surveyed, d.W, d.H));
+    // Passages: depth bands (lighter = shallower), lighter near the walls.
+    const sf = inv(smoothField(d.open, d.W, d.H));
     const fill = new Path2D(), edge = new Path2D();
     contour(sf, d.W, d.H, 0, 0, d.W, d.H, 0.5, fill, edge);
     const small = document.createElement('canvas');
@@ -633,17 +656,9 @@
     ctx.strokeStyle = 'rgba(10,18,24,0.95)'; ctx.lineWidth = 0.9; ctx.stroke(edge);
     ctx.strokeStyle = 'rgba(190,210,205,0.55)'; ctx.lineWidth = 0.25; ctx.stroke(edge);
 
-    // Lines, arrows and jumps.
-    ctx.strokeStyle = AMBER; ctx.lineWidth = 0.45; ctx.lineJoin = 'round';
-    for (const line of d.lines) {
-      ctx.beginPath();
-      line.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-      ctx.stroke();
-    }
-    ctx.setLineDash([1, 0.8]);
-    for (const j of d.jumps) { ctx.beginPath(); ctx.moveTo(j.ax, j.ay); ctx.lineTo(j.bx, j.by); ctx.stroke(); }
-    ctx.setLineDash([]);
-    for (const m of d.markers) drawArrow(ctx, m.x, m.y, m.ex, m.ey, 2, AMBER);
+    // The tie-off post.
+    ctx.strokeStyle = AMBER; ctx.lineWidth = 0.6;
+    ctx.beginPath(); ctx.arc(d.anchor.x, d.anchor.y, 1.4, 0, Math.PI * 2); ctx.stroke();
 
     ctx.fillStyle = '#ffd48a';
     ctx.beginPath(); ctx.rect(d.goal.x - 1.2, d.goal.y - 0.8, 2.4, 1.6); ctx.fill();
@@ -651,7 +666,7 @@
     ctx.font = `700 ${Math.round(scale * 3.2)}px system-ui, sans-serif`;
     ctx.fillStyle = '#e8f1f2';
     ctx.fillText('ENTRANCE', 2 * scale, 30 * scale);
-    ctx.fillText('END OF LINE', (d.goal.x - 6) * scale, (d.goal.y + 10) * scale);
+    ctx.fillText('END CHAMBER', (d.goal.x - 7) * scale, (d.goal.y + 10) * scale);
     for (let m = 10; m / C.CELL_M < y1 - 2; m += 10) {
       ctx.fillStyle = 'rgba(160,190,200,0.5)';
       ctx.font = `600 ${Math.round(scale * 2.4)}px system-ui, sans-serif`;

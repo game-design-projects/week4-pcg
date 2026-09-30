@@ -1,8 +1,9 @@
-// Cave generator: seed + level -> a checked, playable dive.
+// Cave generator: seed + level -> a checked, playable maze dive.
 //
-// Pipeline: cave graph -> carve passages into a grid -> clearance map ->
-// guideline, markers, leads -> silt beds and props -> fairness check and gas
-// budget. A dive that fails the check is regenerated from a derived seed.
+// Pipeline: maze graph -> carve passages into a grid -> clearance map ->
+// silt beds and props -> fairness check, gas budget and reel length. There is
+// no pre-laid guideline: the diver lays their own. A dive that fails the check
+// is regenerated from a derived seed. Level 0 is the tutorial cave.
 (function (root) {
   'use strict';
   const { RNG, valueNoise } = root.CaveRNG || require('./rng.js');
@@ -16,28 +17,34 @@
     TIGHT: 2.1,         // passage no more than 4 cells (2 m) across: a squeeze
     SWIM_SPEED: 4,      // cells/s with a normal kick
     TIGHT_SPEED: 0.5,   // speed multiplier in tight spots
-    BLIND_SPEED: 0.55,  // speed multiplier following the line by touch
+    BLIND_SPEED: 0.6,   // speed multiplier following the line by touch
     TIGHT_STRESS: 1.2,  // breathing multiplier in a squeeze
     BLIND_STRESS: 1.1,  // breathing multiplier in zero visibility with a hand on the line
     P0: 200,            // starting gas, bar
     MAX_ATTEMPTS: 30,
   };
-  const TAG = { ROCK: 0, MAIN: 1, BASIN: 2, LINED: 3, BRANCH: 4, LOOP: 5 };
+  // ROUTE: passages on the shortest way to the goal; SIDE: everything else (dead ends, loops).
+  const TAG = { ROCK: 0, ROUTE: 1, BASIN: 2, SIDE: 4 };
 
   function params(level) {
     const L = Math.max(0, level | 0);
+    if (L === 0) {
+      // Tutorial: one short passage to a chamber, generous gas and reel.
+      return { level: 0, tutorial: true, cols: 3, rows: 1, loops: 0, squeezes: 0, chamberChance: 0,
+        gasMargin: 3, reelSlack: 2.5, siltiness: 0.7, visibility: 16 };
+    }
     return {
       level: L,
-      mainNodes: 6 + Math.min(L, 8),
-      branches: Math.min(1 + Math.floor(L * 0.8), 7),
-      loops: L >= 2 ? Math.min(1 + Math.floor((L - 2) / 3), 3) : 0,
-      squeezes: Math.min(Math.floor(L * 0.6), 5),
-      chamberChance: 0.28,
-      lineBranchChance: Math.min(0.35 + L * 0.06, 0.75),
-      gasMargin: Math.max(1.08, 1.45 - L * 0.05),
+      tutorial: false,
+      cols: Math.min(4 + L, 12),                  // maze size grows with level
+      rows: Math.min(2 + Math.ceil(L / 3), 5),
+      loops: Math.floor(L / 2),                   // extra connections: more than one way through
+      squeezes: Math.min(Math.floor(L * 0.7), 7),
+      chamberChance: 0.22,
+      gasMargin: Math.max(1.5, 2.5 - L * 0.11),   // room for wrong turns, shrinking with level
+      reelSlack: Math.max(1.5, 2.2 - L * 0.08),   // reel length / shortest route
       siltiness: Math.min(0.55 + L * 0.1, 1.4),
       visibility: Math.max(10, 16 - L * 0.7),
-      depthBias: Math.min(0.2 + L * 0.1, 1),
     };
   }
 
@@ -49,100 +56,89 @@
     if (t > b) return smooth(((b + ramp) - t) / ramp);
     return 1;
   }
-  function pointSegDist(px, py, ax, ay, bx, by) {
-    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
-    const t = l2 ? clamp(((px - ax) * dx + (py - ay) * dy) / l2, 0, 1) : 0;
-    return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
-  }
-
-  // ---------------------------------------------------------------- graph
-  function buildGraph(rng, P) {
+  // ---------------------------------------------------------------- maze
+  // Passages join a jittered grid of junctions. A growing-tree walk makes a
+  // spanning tree (long winding corridors with dead ends off them), a few
+  // extra edges add loops, and the goal is the junction farthest from the
+  // entrance along the maze.
+  function buildMaze(rng, P) {
     const nodes = [], edges = [];
-    const node = (x, y, r, kind) => (nodes.push({ id: nodes.length, x, y, r, kind }), nodes.length - 1);
-    const edge = (a, b, kind, re, squeeze) => edges.push({ id: edges.length, a, b, kind, re, squeeze });
-
-    const main = [node(C.BASIN_W - 3, 19, 4, 'mouth')];
-    let x = C.BASIN_W - 3, y = 19;
-    for (let i = 0; i < P.mainNodes; i++) {
-      x += rng.range(17, 27);
-      y = clamp(y + rng.range(-9, 11) + P.depthBias * 4, 14, C.H - 18);
-      const last = i === P.mainNodes - 1;
-      const chamber = last || (i > 0 && rng.chance(P.chamberChance));
-      main.push(node(x, y, chamber ? rng.range(5, 7.5) : rng.range(2.4, 3.4),
-        last ? 'goal' : chamber ? 'chamber' : 'passage'));
-    }
-    for (let i = 0; i + 1 < main.length; i++) edge(main[i], main[i + 1], 'main', rng.range(2.6, 3.6), false);
-
-    // Squeezes go on main edges after the first, then on branches below.
-    const candidates = edges.slice(1).map((e) => e.id);
-    for (let s = 0; s < P.squeezes && candidates.length; s++) {
-      const k = rng.int(0, candidates.length - 1);
-      edges[candidates.splice(k, 1)[0]].squeeze = true;
-    }
-
-    const W = Math.ceil(x + 20);
-    const fits = (ax, ay, bx, by, re, skip) => {
-      if (bx < C.BASIN_W + 8 || bx > W - 10 || by < 8 || by > C.H - 9) return false;
-      for (const e of edges) {
-        if (skip.includes(e.a) || skip.includes(e.b)) continue;
-        const A = nodes[e.a], B = nodes[e.b];
-        const need = re + Math.max(e.re, A.r, B.r) + 4;
-        for (let t = 0; t <= 1; t += 0.1) {
-          if (pointSegDist(ax + (bx - ax) * t, ay + (by - ay) * t, A.x, A.y, B.x, B.y) < need) return false;
-        }
-      }
-      return true;
+    const node = (x, y, r, kind) => (nodes.push({ id: nodes.length, x, y, r, kind, deg: 0 }), nodes.length - 1);
+    const edge = (a, b) => {
+      edges.push({ id: edges.length, a, b, re: rng.range(2.5, 3.4), squeeze: false });
+      nodes[a].deg++; nodes[b].deg++;
     };
-
-    // Side branches: dead ends that end in an unsurveyed lead.
-    const branches = [];
-    for (let b = 0; b < P.branches; b++) {
-      for (let tries = 0; tries < 25; tries++) {
-        const from = main[rng.int(1, main.length - 2)];
-        const dir = rng.chance(0.5) ? -1 : 1;
-        const len = rng.int(1, 3), squeeze = rng.chance(0.3 + P.level * 0.05);
-        const ids = [];
-        let px = nodes[from].x, py = nodes[from].y, ok = true, parent = from;
-        const planned = [];
-        for (let k = 0; k < len && ok; k++) {
-          const nx = px + rng.range(-6, 14), ny = py + dir * rng.range(9, 15);
-          const re = rng.range(2, 2.9);
-          if (!fits(px, py, nx, ny, re, [parent])) ok = false;
-          planned.push({ nx, ny, re, parent });
-          parent = -1 - k; px = nx; py = ny;
-        }
-        if (!ok) continue;
-        let prev = from;
-        planned.forEach((p, k) => {
-          const last = k === planned.length - 1;
-          const id = node(p.nx, p.ny, last && rng.chance(0.5) ? rng.range(3.5, 5.5) : p.re + 0.3, last ? 'lead' : 'branch');
-          edge(prev, id, 'branch', p.re, squeeze && k === 0);
-          ids.push(id); prev = id;
-        });
-        branches.push({ from, nodes: ids, lined: rng.chance(P.lineBranchChance) });
-        break;
+    const sx = rng.range(18, 22), sy = rng.range(17, 21);
+    const x0 = C.BASIN_W + 12, y0 = P.tutorial ? 22 : 20;
+    const grid = [];
+    for (let c = 0; c < P.cols; c++) {
+      grid.push([]);
+      for (let r = 0; r < P.rows; r++) {
+        const jx = P.tutorial ? 0 : rng.range(-3.5, 3.5), jy = P.tutorial ? rng.range(-2, 2) : rng.range(-3, 3);
+        grid[c].push(node(x0 + c * sx + jx, y0 + r * sy + jy, rng.range(2.8, 3.6), 'junction'));
       }
     }
+    const at = (c, r) => (c >= 0 && r >= 0 && c < P.cols && r < P.rows ? grid[c][r] : -1);
+    const cellOf = (id) => { for (let c = 0; c < P.cols; c++) { const r = grid[c].indexOf(id); if (r >= 0) return [c, r]; } return null; };
+    const nbrs = (id) => { const [c, r] = cellOf(id); return [at(c + 1, r), at(c - 1, r), at(c, r + 1), at(c, r - 1)].filter((n) => n >= 0); };
 
-    // Loops: a detour that leaves the main passage and rejoins it further in.
-    const loops = [];
-    for (let l = 0; l < P.loops; l++) {
-      for (let tries = 0; tries < 25; tries++) {
-        const i = rng.int(1, main.length - 3), j = i + rng.int(2, Math.min(3, main.length - 1 - i));
-        const A = nodes[main[i]], B = nodes[main[j]];
-        const dir = rng.chance(0.5) ? -1 : 1;
-        const mx = (A.x + B.x) / 2 + rng.range(-5, 5), my = (A.y + B.y) / 2 + dir * rng.range(15, 22);
-        const re = rng.range(2, 2.8);
-        const skip = main.slice(i, j + 1);
-        if (!fits(A.x, A.y, mx, my, re, skip) || !fits(mx, my, B.x, B.y, re, skip)) continue;
-        const m = node(mx, my, re + 0.4, 'loop');
-        edge(main[i], m, 'loop', re, rng.chance(0.4));
-        edge(m, main[j], 'loop', re, false);
-        loops.push({ from: main[i], to: main[j], node: m });
-        break;
+    // Growing tree: mostly extend the newest corridor, sometimes branch from an older one.
+    const linked = new Set(), seen = new Set([grid[0][0]]), active = [grid[0][0]];
+    const key = (a, b) => (a < b ? a + ':' + b : b + ':' + a);
+    while (active.length) {
+      const i = rng.chance(0.75) ? active.length - 1 : rng.int(0, active.length - 1);
+      const cur = active[i], open = nbrs(cur).filter((n) => !seen.has(n));
+      if (!open.length) { active.splice(i, 1); continue; }
+      const nb = rng.pick(open);
+      edge(cur, nb); linked.add(key(cur, nb)); seen.add(nb); active.push(nb);
+    }
+    // Loops.
+    const extra = [];
+    for (let c = 0; c < P.cols; c++) for (let r = 0; r < P.rows; r++) {
+      for (const n of [at(c + 1, r), at(c, r + 1)]) if (n >= 0 && !linked.has(key(grid[c][r], n))) extra.push([grid[c][r], n]);
+    }
+    for (let l = 0; l < P.loops && extra.length; l++) {
+      const [a, b] = extra.splice(rng.int(0, extra.length - 1), 1)[0];
+      edge(a, b); linked.add(key(a, b));
+    }
+
+    // The pool's mouth joins the first junction.
+    const mouth = node(C.BASIN_W - 3, 19, 4, 'mouth');
+    edge(mouth, grid[0][0]);
+
+    // Goal: the junction farthest from the mouth through the maze.
+    const dist = nodes.map(() => Infinity), prev = nodes.map(() => -1);
+    dist[mouth] = 0;
+    const todo = new Set(nodes.map((n) => n.id));
+    while (todo.size) {
+      let u = -1;
+      for (const v of todo) if (u < 0 || dist[v] < dist[u]) u = v;
+      todo.delete(u);
+      for (const e of edges) {
+        const v = e.a === u ? e.b : e.b === u ? e.a : -1;
+        if (v < 0) continue;
+        const d = dist[u] + Math.hypot(nodes[v].x - nodes[u].x, nodes[v].y - nodes[u].y);
+        if (d < dist[v]) { dist[v] = d; prev[v] = u; }
       }
     }
-    return { nodes, edges, main, branches, loops, W };
+    let goal = grid[0][0];
+    for (const n of nodes) if (n.kind === 'junction' && dist[n.id] > dist[goal]) goal = n.id;
+    nodes[goal].kind = 'goal';
+    nodes[goal].r = rng.range(5, 7);
+    const onRoute = new Set();
+    for (let v = goal; v >= 0; v = prev[v]) onRoute.add(v);
+    for (const e of edges) e.route = onRoute.has(e.a) && onRoute.has(e.b) && (prev[e.a] === e.b || prev[e.b] === e.a);
+    for (const n of nodes) {
+      n.route = onRoute.has(n.id);
+      if (n.kind === 'junction' && rng.chance(P.chamberChance)) { n.kind = 'chamber'; n.r = rng.range(4.5, 6.5); }
+    }
+
+    // Squeezes: anywhere but the mouth.
+    const candidates = edges.filter((e) => e.a !== mouth && e.b !== mouth).map((e) => e.id);
+    for (let q = 0; q < P.squeezes && candidates.length; q++) edges[candidates.splice(rng.int(0, candidates.length - 1), 1)[0]].squeeze = true;
+
+    const W = Math.ceil(Math.max(...nodes.map((n) => n.x)) + 22);
+    return { nodes, edges, mouth, goal, W };
   }
 
   // ---------------------------------------------------------------- carving
@@ -191,21 +187,14 @@
       if (ex * ex + ey * ey < 1 + 0.15 * wall(cx, cy)) set(cy * W + cx, TAG.BASIN);
     }
 
-    const tagFor = (e) => {
-      if (e.kind === 'main') return TAG.MAIN;
-      if (e.kind === 'loop') return TAG.LOOP;
-      const br = g.branches.find((b) => b.nodes.includes(e.b));
-      return br && br.lined ? TAG.LINED : TAG.BRANCH;
-    };
     for (const e of g.edges) {
       e.path = edgePath(rng, wiggle, g.nodes[e.a], g.nodes[e.b], e);
-      const t = tagFor(e);
+      const t = e.route ? TAG.ROUTE : TAG.SIDE;
       for (const p of e.path) disc(p.x, p.y, p.r, p.squeeze ? 0.2 : 1.0, t);
     }
     for (const n of g.nodes) {
-      const t = n.kind === 'loop' ? TAG.LOOP : n.kind === 'branch' || n.kind === 'lead'
-        ? tagFor(g.edges.find((e) => e.b === n.id)) : n.kind === 'mouth' ? TAG.BASIN : TAG.MAIN;
-      if (n.kind === 'chamber' || n.kind === 'goal' || (n.kind === 'lead' && n.r > 3.4)) {
+      const t = n.kind === 'mouth' ? TAG.BASIN : n.route ? TAG.ROUTE : TAG.SIDE;
+      if (n.kind === 'chamber' || n.kind === 'goal') {
         const floorY = n.y + n.r * 0.6;   // chambers get a flat, silty floor
         disc(n.x, n.y, n.r, 1.4, t, floorY);
         for (let k = 0; k < 4; k++) {
@@ -363,41 +352,14 @@
     };
   }
 
-  // ---------------------------------------------------------------- lines
-  function losClear(cave, ax, ay, bx, by) {
-    const n = Math.ceil(Math.hypot(bx - ax, by - ay) / 0.25);
-    for (let s = 0; s <= n; s++) {
-      const x = ax + ((bx - ax) * s) / n, y = ay + ((by - ay) * s) / n;
-      const i = Math.floor(y) * cave.W + Math.floor(x);
-      if (!cave.pass[i]) return false;
-    }
-    return true;
-  }
-
-  // Tie-offs: walk the centre line and keep the farthest point in straight sight.
-  function layLine(cave, pts, kind, maxSpan) {
-    const anchors = [pts[0]];
-    let i = 0;
-    while (i < pts.length - 1) {
-      let best = -1;
-      for (let j = i + 1; j < pts.length; j++) {
-        if (Math.hypot(pts[j].x - pts[i].x, pts[j].y - pts[i].y) > maxSpan) break;
-        if (losClear(cave, pts[i].x, pts[i].y, pts[j].x, pts[j].y)) best = j;
-      }
-      if (best < 0) return null;
-      anchors.push(pts[best]);
-      i = best;
-    }
-    return makeLine(anchors.map((p) => ({ x: p.x, y: p.y })), kind);
-  }
-
+  // ---------------------------------------------------------------- lines (laid by the diver)
   function makeLine(pts, kind) {
     const cum = [0];
     for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
     return { kind, pts, cum, total: cum[cum.length - 1] };
   }
 
-  // Point at arc length s, and the unit direction toward the start (the exit).
+  // Point at arc length s, and the unit direction back toward the line's start.
   function linePoint(line, s) {
     const { pts, cum } = line;
     let i = 1;
@@ -420,7 +382,7 @@
   // ---------------------------------------------------------------- one attempt
   function attempt(seed, level, P) {
     const rng = new RNG(seed);
-    const g = buildGraph(rng, P);
+    const g = buildMaze(rng, P);
     const cave = carveAll(rng, seed, g, P);
     const start = { x: 8, y: 5 };
     keepConnected(cave, Math.floor(start.x), Math.floor(start.y));
@@ -432,85 +394,56 @@
     const fail = (why) => ({ ok: false, why, cave, graph: g });
     const W = cave.W, idx = (p) => Math.floor(p.y) * W + Math.floor(p.x);
 
-    // Main line: primary tie-off in the pool, then along the main passage to the goal.
-    const tie = { x: C.BASIN_W - 10, y: 16 };
-    const centre = [tie, g.nodes[g.main[0]]];
-    for (const e of g.edges) if (e.kind === 'main') centre.push(...e.path.slice(1));
-    const mainLine = layLine(cave, centre, 'main', 14);
-    if (!mainLine) return fail('main line blocked');
-    const goalNode = g.nodes[g.main[g.main.length - 1]];
+    // The primary tie-off in the pool, where a diver ties their reel in.
+    const anchor = { x: C.BASIN_W - 9, y: 17 };
+    const goalNode = g.nodes[g.goal];
     const goal = { x: goalNode.x, y: goalNode.y };
 
-    // Markers: arrows on the line pointing toward the exit.
-    const markers = [];
-    const mark = (lineId, line, s) => {
-      const p = linePoint(line, s);
-      markers.push({ line: lineId, s, x: p.x, y: p.y, ex: p.ex, ey: p.ey });
-    };
-    for (let s = 3; s < mainLine.total - 2; s += rng.range(16, 24)) mark(0, mainLine, s);
-
-    // Branch lines start a short gap away from the main line: a jump.
-    const lines = [mainLine], jumps = [], leads = [];
-    for (const br of g.branches) {
-      const leadNode = g.nodes[br.nodes[br.nodes.length - 1]];
-      if (!cave.pass[idx(leadNode)]) continue;
-      const lead = { x: leadNode.x, y: leadNode.y, lined: false, surveyed: false };
-      const pts = [];
-      for (const e of g.edges) if (e.kind === 'branch' && br.nodes.includes(e.b)) pts.push(...(pts.length ? e.path.slice(1) : e.path));
-      if (br.lined) {
-        const on = nearestOnLine(mainLine, pts[0].x, pts[0].y);
-        let k = 0;   // skip ahead until the branch line starts 2.5-4 m off the main line
-        while (k < pts.length - 2 && nearestOnLine(mainLine, pts[k].x, pts[k].y).d < rng.range(5, 8)) k++;
-        const bl = k < pts.length - 2 ? layLine(cave, pts.slice(k), 'branch', 12) : null;
-        if (bl) {
-          const from = nearestOnLine(mainLine, bl.pts[0].x, bl.pts[0].y);
-          if (losClear(cave, from.x, from.y, bl.pts[0].x, bl.pts[0].y)) {
-            lines.push(bl);
-            jumps.push({ ax: from.x, ay: from.y, bx: bl.pts[0].x, by: bl.pts[0].y });
-            lead.lined = true;
-            for (let s = 1; s < bl.total - 1; s += rng.range(12, 18)) mark(lines.length - 1, bl, s);
-            mark(0, mainLine, on.s);   // an arrow at the junction on the main line
-          }
-        }
-      }
-      leads.push(lead);
-    }
-
     // ---- fairness check: the gas-cost search
-    const startI = idx(start), goalI = idx(goal);
-    if (!cave.pass[startI] || !cave.pass[goalI]) return fail('start or goal inside rock');
-    const cost = dijkstra(cave, [startI], gasStep(cave));
+    const startI = idx(start), goalI = idx(goal), anchorI = idx(anchor);
+    if (!cave.pass[startI] || !cave.pass[goalI] || !cave.pass[anchorI]) return fail('start, tie-off or goal inside rock');
+    const cost = dijkstra(cave, [anchorI], gasStep(cave));
     if (!isFinite(cost[goalI])) return fail('goal unreachable');
     const exitCells = [];
     for (let y = 1; y < 26; y++) for (let x = 1; x < C.BASIN_W - 6; x++) if (cave.pass[y * W + x]) exitCells.push(y * W + x);
     const exitDist = dijkstra(cave, exitCells, (j, len) => len);
-    if (exitDist[goalI] * C.CELL_M < 45) return fail('too short');
-    for (const l of leads) l.reachable = isFinite(cost[idx(l)]);
-
-    // Gas along the line, as the player will actually swim it.
-    let lineCost = 0;
-    for (let s = 0; s < mainLine.total; s += 0.5) {
-      const p = linePoint(mainLine, s), i = idx(p);
-      lineCost += (0.5 / C.SWIM_SPEED) * (cave.tight[i] ? C.TIGHT_STRESS / C.TIGHT_SPEED : 1) * depthFactor(p.y);
+    // The way a diver would swim from the tie-off to the goal: shortest, but
+    // kept off the walls (steps near rock cost more), walked back down the field.
+    const midField = dijkstra(cave, [anchorI], (j, len) => len * (1 + 2.5 / Math.max(0.6, cave.clear[j])));
+    const route = [];
+    let routeCells = 0, routeCost = 0;
+    for (let i = goalI, guard = 0; guard < W * cave.H; guard++) {
+      route.push({ x: (i % W) + 0.5, y: ((i / W) | 0) + 0.5 });
+      if (i === anchorI) break;
+      let best = i;
+      const x = i % W, y = (i / W) | 0;
+      for (const [ox, oy] of NB) {
+        const j = (y + oy) * W + x + ox;
+        if (cave.pass[j] && midField[j] < midField[best]) best = j;
+      }
+      if (best === i) return fail('route walk stuck');
+      const step = Math.hypot((best % W) - x, ((best / W) | 0) - y);
+      routeCells += step;
+      routeCost += gasStep(cave)(i, step);
+      i = best;
     }
-    if (lineCost > cost[goalI] * 1.6) return fail('line detours too much');
-    // Gas is always 200 bar; the breathing rate is scaled so that reaching the
-    // goal along the line costs a third of it, divided by the margin.
-    const k = C.P0 / (3 * P.gasMargin * lineCost);
+    route.reverse();
+    if (!P.tutorial && routeCells * C.CELL_M < 40) return fail('too short');
+
+    // Gas is always 200 bar. The breathing rate is set so that swimming the
+    // route to the goal costs a third of it, divided by the margin (the margin
+    // is room for wrong turns). The reel holds the route times the slack.
+    if (routeCost > cost[goalI] * 1.6) return fail('route detours too much');
+    const k = C.P0 / (3 * P.gasMargin * routeCost);
     const turn = C.P0 * (2 / 3);
-    // Worst case on the way out: silted out the whole way, feeling along the line.
-    const blindOut = (lineCost / C.BLIND_SPEED) * C.BLIND_STRESS * k;
-    if (blindOut > turn) return fail('blind exit would not fit in two thirds');
+    const reel = Math.ceil((routeCells * P.reelSlack * C.CELL_M) / 10) * 10 / C.CELL_M;
+    // A line laid while swimming is never longer than the swim, and following
+    // it out blind costs at most BLIND_STRESS / BLIND_SPEED times as much gas
+    // per cell. Turning at turn pressure with the line intact therefore fits
+    // in the remaining two thirds whatever maze the diver has swum.
+    if (C.BLIND_STRESS / C.BLIND_SPEED > 2) return fail('blind exit factor too high');
 
-    // Extra gas each lead costs, from the nearest point of the main line.
-    for (const l of leads) {
-      if (!l.reachable) continue;
-      const on = nearestOnLine(mainLine, l.x, l.y);
-      const d = dijkstra(cave, [idx(on)], gasStep(cave));
-      l.extraBar = 2 * d[idx(l)] * k;
-    }
-
-    // ---- silt beds
+    // ---- silt beds: heaviest in dead ends and squeezes, lighter on the through route
     const N = W * cave.H, deposit = new Float32Array(N);
     const siltNoise = valueNoise(seed + ':silt', 5);
     for (let y = 1; y < cave.H - 2; y++) for (let x = 1; x < W - 1; x++) {
@@ -521,7 +454,7 @@
       const base = Math.max(floor, side);
       if (!base) continue;
       const t = cave.tag[i];
-      const mult = t === TAG.BASIN ? 0.25 : t === TAG.MAIN ? 0.75 : t === TAG.LINED ? 1.1 : 1.35;
+      const mult = t === TAG.BASIN ? 0.25 : t === TAG.ROUTE ? 0.8 : 1.3;
       const tight = cave.tight[i] ? 1.6 : 1;
       deposit[i] = P.siltiness * base * mult * tight * (0.55 + 0.45 * siltNoise(x, y));
     }
@@ -539,7 +472,7 @@
     for (let y = 2; y < cave.H - 2; y++) for (let x = C.BASIN_W; x < W - 1; x++) {
       const i = y * W + x;
       if (!cave.open[i] || cave.tight[i]) continue;
-      const lush = cave.tag[i] >= TAG.LINED ? 1.8 : 1;
+      const lush = cave.tag[i] === TAG.SIDE ? 1.5 : 1;
       // Ceiling and floor cells touch rock, so check for room two cells into the passage.
       if (!cave.open[i - W] && cave.clear[i + 2 * W] >= 1.5 && rng.chance(0.1 * lush) && free(x, y, 2)) {
         let span = 0;
@@ -557,25 +490,26 @@
 
     // ---- measures shown in the briefing and used by the README
     let maxDepth = 0, tightCells = 0;
-    for (let s = 0; s < mainLine.total; s += 0.5) {
-      const p = linePoint(mainLine, s);
-      maxDepth = Math.max(maxDepth, p.y * C.CELL_M);
-      if (cave.tight[idx(p)]) tightCells++;
-    }
+    for (const p of route) { maxDepth = Math.max(maxDepth, p.y * C.CELL_M); if (cave.tight[idx(p)]) tightCells++; }
+    const junctions = g.nodes.filter((n) => n.kind !== 'mouth' && n.deg >= 3).length;
+    const deadEnds = g.nodes.filter((n) => n.kind !== 'mouth' && n.kind !== 'goal' && n.deg === 1);
+    const straight = Math.hypot(goal.x - anchor.x, goal.y - anchor.y);
 
     return {
-      ok: true, seed, level, params: P, C, TAG,
+      ok: true, seed, level, params: P, C, TAG, tutorial: !!P.tutorial,
       W, H: cave.H, open: cave.open, tag: cave.tag, clear: cave.clear, pass: cave.pass, tight: cave.tight,
-      deposit, exitDist, start, goal, lines, markers, jumps, leads, props,
+      deposit, exitDist, start, anchor, goal, route, props, reel,
+      deadEnds: deadEnds.map((n) => ({ x: n.x, y: n.y, r: n.r })),
       graph: g,
-      budget: { P0: C.P0, k, turn, reserve: C.P0 / 3, lineCost, shortestCost: cost[goalI] },
+      budget: { P0: C.P0, k, turn, reserve: C.P0 / 3, routeCost, shortestCost: cost[goalI] },
       measures: {
-        lineLength: Math.round(mainLine.total * C.CELL_M),
-        penetration: Math.round(exitDist[goalI] * C.CELL_M),
+        routeLength: Math.round(routeCells * C.CELL_M),
+        winding: +(routeCells / straight).toFixed(2),
+        reelLength: Math.round(reel * C.CELL_M),
         maxDepth: Math.round(maxDepth),
-        tightMetres: Math.round(tightCells * 0.5 * C.CELL_M),
-        branches: leads.length, linedBranches: jumps.length, loops: g.loops.length,
-        gasToGoal: Math.round(lineCost * k), blindExit: Math.round(blindOut),
+        tightMetres: Math.round(tightCells * C.CELL_M),
+        junctions, deadEnds: deadEnds.length, loops: P.loops,
+        gasToGoal: Math.round(routeCost * k),
       },
     };
   }
@@ -594,7 +528,7 @@
     throw new Error(`No valid cave for seed ${seed} at level ${level}: ${reasons.join(', ')}`);
   }
 
-  const api = { generate, attempt, params, C, TAG, linePoint, nearestOnLine, makeLine, depthFactor, dijkstra, clearanceMap };
+  const api = { generate, attempt, params, C, TAG, linePoint, nearestOnLine, makeLine, depthFactor, dijkstra, clearanceMap, NB };
   root.CaveGen = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

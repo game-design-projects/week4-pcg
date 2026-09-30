@@ -1,4 +1,4 @@
-// One dive: diver movement, the guideline, silt, gas, and the run log.
+// One dive: diver movement, laying and following the line, silt, gas, and the run log.
 (function (root) {
   'use strict';
   const Gen = root.CaveGen;
@@ -6,14 +6,28 @@
 
   const SPEED_SWIM = C.SWIM_SPEED, SPEED_HARD = 6.5;   // cells/s
   const ACCEL = 16, DRAG = 3.0;
-  const REACH = 1.4;           // how close the line must be to grab it, cells
-  const SPOOL_CELLS = 60;      // 30 m jump spool
+  const REACH = 1.4;           // how close a line must be to grab or tie into it, cells
+  const TIE_ROCK = 2.2;        // clearance at or below this is close enough to rock to tie off
   const SILT_TICK = 0.1;       // silt field update interval, s
   const SILT_HALF_LIFE = 75;   // s for suspended silt to halve (before spreading)
   const ZERO_VIS = 0.28;
 
   const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
   const fmt = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+
+  // Level 0: learn to lay a line in and follow it out.
+  const TUTORIAL = [
+    { text: 'Swim down to the amber tie-off post in the pool and press R to tie your reel in.',
+      done: (g) => g.reel.active !== null && g.lines[g.reel.active].anchored },
+    { text: 'Swim into the cave. The reel pays out line behind you. If you back up, it reels the line back in.',
+      done: (g) => g.laidMetres() >= 12 },
+    { text: 'Follow the passage to the chamber at the end.',
+      done: (g) => g.goalTagged },
+    { text: 'Press R to tie your line off here, so it stays in place.',
+      done: (g) => g.reel.active === null && g.lines.some((l) => l.fixed && l.anchored) },
+    { text: 'Silt-out! You can’t see a thing. Hold Space to take hold of your line and follow it back to the pool.',
+      enter: (g) => g.siltOut() },
+  ];
 
   function Game(dive, mapMode) {
     this.d = dive;
@@ -23,16 +37,15 @@
     this.siltNext = new Float32Array(N);
     this.stirredAt = new Float32Array(N).fill(-1);
     this.deposit = dive.deposit.slice();
-    this.lines = dive.lines.slice();
-    this.leads = dive.leads.map((l) => Object.assign({}, l));
+    this.lines = [];               // every line the diver has laid
+    this.reel = { left: dive.reel, active: null };
     this.t = 0;
     this.siltClock = 0;
     this.gas = C.P0;
     this.diver = { x: dive.start.x, y: dive.start.y, vx: 0, vy: 0, face: 0, anim: 0, hard: false, tight: false, moving: false };
     this.hold = null;              // { line, s } while holding a line
     this.lastLine = -1;
-    this.spool = { left: SPOOL_CELLS, line: null, used: false };
-    this.felt = null;              // marker under the diver's hand
+    this.felt = null;              // which way the held line runs back
     this.lamp = { reach: dive.params.visibility, vis: 1 };
     this.goalTagged = false;
     this.entered = false;
@@ -44,13 +57,15 @@
     this.zeroVisTime = 0;
     this.gasHard = 0; this.gasStress = 0;
     this.bumps = 0;
+    this.deadEndsSeen = new Set();
     this.log = [];
     this.toasts = [];
     this.puffs = [];
     this.bubbles = [];
     this.breath = 0;
     this.done = null;
-    this.event('start', `Descended into the entrance pool with ${C.P0} bar. Turn pressure: ${Math.round(dive.budget.turn)} bar.`);
+    this.tutorial = dive.tutorial ? { step: 0, steps: TUTORIAL } : null;
+    this.event('start', `Descended into the entrance pool with ${C.P0} bar and ${Math.round(dive.reel * C.CELL_M)} m of line on the reel. Turn pressure: ${Math.round(dive.budget.turn)} bar.`);
   }
 
   Game.prototype.idx = function (x, y) { return Math.floor(y) * this.d.W + Math.floor(x); };
@@ -78,10 +93,21 @@
   Game.prototype.toast = function (text, secs) { this.toasts.push({ text, until: this.t + (secs || 3.5) }); };
 
   // ------------------------------------------------------------------ lines
-  Game.prototype.nearestLine = function (x, y, reach) {
+  Game.prototype.laidMetres = function () {
+    return this.lines.reduce((s, l) => s + l.total, 0) * C.CELL_M;
+  };
+
+  // A line leads out if it was tied in at the pool, or tied into a line that does.
+  Game.prototype.connected = function (i, depth) {
+    const line = this.lines[i];
+    if (!line || (depth || 0) > this.lines.length) return false;
+    return line.anchored || (line.parent >= 0 && this.connected(line.parent, (depth || 0) + 1));
+  };
+
+  Game.prototype.nearestLine = function (x, y, reach, skip) {
     let best = null;
     this.lines.forEach((line, i) => {
-      if (this.spool.line === line && !this.spool.used) return;   // can't hold a line you're still laying
+      if (i === skip || line.total < 0.05) return;
       const n = Gen.nearestOnLine(line, x, y);
       if (n.d <= reach && (!best || n.d < best.d)) best = { line: i, s: n.s, d: n.d, x: n.x, y: n.y };
     });
@@ -95,64 +121,108 @@
     return { x: dx / l, y: dy / l };
   };
 
-  // Pushing off the end of a line moves the hand onto another line tied in there.
-  Game.prototype.transferAtEnd = function (line) {
+  Game.prototype.refresh = function (line) {
+    const fresh = Gen.makeLine(line.pts, line.kind);
+    line.cum = fresh.cum; line.total = fresh.total;
+  };
+
+  // R: tie the reel in (at the pool's post, into a line, or to rock), or tie it off.
+  Game.prototype.toggleReel = function () {
     const d = this.diver;
-    let best = null;
-    this.lines.forEach((other, i) => {
-      if (other === line || (this.spool.line === other && !this.spool.used)) return;
-      const n = Gen.nearestOnLine(other, d.x, d.y);
-      if (n.d <= REACH && (!best || n.d < best.d)) best = { line: i, s: n.s, d: n.d };
-    });
-    if (!best) return false;
-    this.hold = { line: best.line, s: best.s };
-    this.lastLine = best.line;
-    const kind = this.lines[best.line].kind;
-    this.event('switch', kind === 'branch' ? 'Moved across onto a branch line.' : kind === 'spool' ? 'Moved onto your spool line.' : 'Moved back onto the main line.');
+    if (this.reel.active !== null) return this.tieOff('Tied off your line.');
+    if (this.reel.left < 1) { this.toast('Your reel is empty.'); return; }
+    const a = this.d.anchor;
+    const near = this.nearestLine(d.x, d.y, REACH);
+    let start, parent = -1, anchored = false, how;
+    if (Math.hypot(d.x - a.x, d.y - a.y) < 2.5) { start = { x: a.x, y: a.y }; anchored = true; how = 'at the tie-off post in the pool'; }
+    else if (near) { start = { x: near.x, y: near.y }; parent = near.line; how = 'into an existing line'; }
+    else if ((this.d.clear[this.idx(d.x, d.y)] || 0) <= TIE_ROCK) { start = { x: d.x, y: d.y }; how = 'to the rock'; }
+    else { this.toast('Nothing to tie to here. Get close to the rock, a line, or the post in the pool.'); return; }
+    const line = Gen.makeLine([start, { x: start.x + 0.01, y: start.y }], 'reel');
+    line.fixed = false; line.anchored = anchored; line.parent = parent;
+    this.lines.push(line);
+    this.reel.active = this.lines.length - 1;
+    const leads = this.connected(this.reel.active);
+    this.event('tie_in', `Tied the reel in ${how}${leads ? '' : ', not connected to the entrance'}.`);
+    this.toast(leads ? 'Reel tied in. Line pays out as you swim; R again to tie off.' : 'Reel tied in, but this line does not lead back to the entrance.', 4);
+  };
+
+  Game.prototype.tieOff = function (msg) {
+    const line = this.lines[this.reel.active], d = this.diver;
+    const last = line.pts[line.pts.length - 1], step = Math.hypot(d.x - last.x, d.y - last.y);
+    if (step > 0.05 && this.hold === null) {
+      line.pts.push({ x: d.x, y: d.y });
+      this.reel.left -= step;
+      this.refresh(line);
+    }
+    line.fixed = true;
+    this.reel.active = null;
+    this.event('tie_off', `${msg} ${Math.round(line.total * C.CELL_M)} m of line in place, ${Math.max(0, Math.round(this.reel.left * C.CELL_M))} m left on the reel.`);
+    this.toast(msg, 3);
+  };
+
+  // Reel line back in to arc length s.
+  Game.prototype.truncate = function (line, s) {
+    if (s >= line.total - 0.02) return;
+    const p = Gen.linePoint(line, s);
+    let i = line.pts.length - 1;
+    while (i > 0 && line.cum[i - 1] >= s) i--;
+    const back = line.total - s;
+    line.pts.length = i;
+    line.pts.push({ x: p.x, y: p.y });
+    if (line.pts.length < 2) line.pts.push({ x: p.x + 0.01, y: p.y });
+    this.reel.left += back;
+    this.refresh(line);
+  };
+
+  // While the reel is open and the diver swims free: pay out ahead, reel in on the way back.
+  Game.prototype.payOut = function () {
+    const line = this.lines[this.reel.active], pts = line.pts, d = this.diver;
+    let changed = false;
+    // Coming back over the line (not necessarily exactly on it) winds it back in
+    // to that point. The last stretch needs a closer pass, or laying would undo itself.
+    const n = pts.length;
+    let cut = -1;
+    for (let i = Math.max(1, n - 80); i <= n - 2 && cut < 0; i++) {
+      if (Math.hypot(d.x - pts[i].x, d.y - pts[i].y) < (i === n - 2 ? 0.9 : 1.3)) cut = i;
+    }
+    if (cut >= 0) {
+      this.reel.left += line.total - line.cum[cut];
+      pts.length = cut + 1;
+      changed = true;
+    }
+    const last = pts[pts.length - 1], step = Math.hypot(d.x - last.x, d.y - last.y);
+    if (step >= 1) {
+      pts.push({ x: d.x, y: d.y });
+      this.reel.left -= step;
+      changed = true;
+    }
+    if (changed) this.refresh(line);
+    if (this.reel.left <= 0) {
+      this.reel.left = 0;
+      this.event('reel_empty', 'Ran the reel to its end.');
+      this.tieOff('Reel empty: line tied off.');
+    }
+  };
+
+  // Pushing off the end of a fixed line moves the hand onto another line tied in there.
+  Game.prototype.transferAtEnd = function (line) {
+    const d = this.diver, from = this.hold.line;
+    const near = this.nearestLine(d.x, d.y, REACH, from);
+    if (!near) return false;
+    this.hold = { line: near.line, s: near.s };
+    this.lastLine = near.line;
+    this.event('switch', 'Moved your hand across onto another line.');
     return true;
   };
 
-  Game.prototype.toggleSpool = function () {
-    const sp = this.spool;
-    if (sp.line && !sp.used) {
-      // Tie off right where the diver is, including the last stretch under a cell.
-      const pts = sp.line.pts, last = pts[pts.length - 1], d = this.diver;
-      const step = Math.hypot(d.x - last.x, d.y - last.y);
-      if (step > 0.05) {
-        pts.push({ x: d.x, y: d.y });
-        sp.left -= step;
-        const fresh = Gen.makeLine(pts, 'spool');
-        sp.line.cum = fresh.cum; sp.line.total = fresh.total;
-      }
-      sp.used = true;
-      this.event('spool_off', `Tied off the spool with ${Math.round((SPOOL_CELLS - sp.left) * C.CELL_M)} m laid.`);
-      this.toast('Spool tied off. Its line can be followed back.');
-      return;
+  // Tutorial: the whole cave silts out at once.
+  Game.prototype.siltOut = function () {
+    const d = this.d;
+    for (let i = 0; i < this.silt.length; i++) {
+      if (d.open[i] && d.exitDist[i] > 6) { this.silt[i] = 3; this.stirredAt[i] = this.t; }
     }
-    if (sp.used) { this.toast('Your only spool is already laid.'); return; }
-    const near = this.nearestLine(this.diver.x, this.diver.y, REACH);
-    if (!near) { this.toast('Get within reach of a line to tie the spool in.'); return; }
-    sp.line = Gen.makeLine([{ x: near.x, y: near.y }, { x: near.x + 0.01, y: near.y }], 'spool');
-    this.lines.push(sp.line);
-    this.event('spool_on', 'Tied a jump spool into the line and started laying it.');
-    this.toast('Laying spool line. Press R again to tie it off.');
-  };
-
-  Game.prototype.laySpool = function () {
-    const sp = this.spool, d = this.diver;
-    if (!sp.line || sp.used) return;
-    const pts = sp.line.pts, last = pts[pts.length - 1];
-    const step = Math.hypot(d.x - last.x, d.y - last.y);
-    if (step < 1) return;
-    pts.push({ x: d.x, y: d.y });
-    sp.left -= step;
-    const fresh = Gen.makeLine(pts, 'spool');
-    sp.line.cum = fresh.cum; sp.line.total = fresh.total;
-    if (sp.left <= 0) {
-      sp.used = true;
-      this.event('spool_off', 'Ran the spool to its end (30 m).');
-      this.toast('Spool empty: tied off.');
-    }
+    this.siltDirty = true;
   };
 
   // ------------------------------------------------------------------ update
@@ -166,18 +236,14 @@
     const vis = 1 / (1 + 3 * localSilt);
     this.lamp.vis = vis;
 
-    // Holding the line.
+    // Holding a line.
     if (input.hold) {
       if (!this.hold) {
         const near = this.nearestLine(d.x, d.y, REACH);
         if (near) {
           this.hold = { line: near.line, s: near.s };
-          if (this.lastLine >= 0 && near.line !== this.lastLine) {
-            const kind = this.lines[near.line].kind;
-            this.event('switch', kind === 'branch' ? 'Crossed the gap onto a branch line.' : kind === 'spool' ? 'Moved onto your spool line.' : 'Crossed back onto the main line.');
-          }
           if (this.flags.lostSince) {
-            this.event('found', `Found the line again after ${Math.round(this.t - this.flags.lostSince)} s without it.`);
+            this.event('found', `Found a line again after ${Math.round(this.t - this.flags.lostSince)} s without one.`);
             this.flags.lostSince = 0;
           }
           this.lastLine = near.line;
@@ -204,9 +270,14 @@
       const along = Math.abs(dot) < 0.2 ? 0 : Math.sign(dot);
       const blind = C.BLIND_SPEED + (1 - C.BLIND_SPEED) * clamp((vis - 0.25) / 0.45, 0, 1);
       const ds = along * maxSpeed * blind * dt;
-      const atEnd = (along < 0 && this.hold.s <= 0.01) || (along > 0 && this.hold.s >= line.total - 0.01);
+      const laying = this.hold.line === this.reel.active;
+      const atEnd = !laying && ((along < 0 && this.hold.s <= 0.01) || (along > 0 && this.hold.s >= line.total - 0.01));
       // After switching lines, start moving along the new one next frame.
-      if (!(atEnd && this.transferAtEnd(line))) this.hold.s = clamp(this.hold.s + ds, 0, line.total);
+      if (!(atEnd && this.transferAtEnd(line))) {
+        this.hold.s = clamp(this.hold.s + ds, 0, line.total);
+        // Following the line you are laying back toward its start reels it in.
+        if (laying) this.truncate(line, this.hold.s);
+      }
       const p = Gen.linePoint(this.lines[this.hold.line], this.hold.s);
       const k = Math.min(1, 12 * dt);
       const nx = d.x + (p.x - d.x) * k, ny = d.y + (p.y - d.y) * k;
@@ -220,6 +291,7 @@
       const sp = Math.hypot(d.vx, d.vy);
       if (sp > maxSpeed) { d.vx *= maxSpeed / sp; d.vy *= maxSpeed / sp; }
       this.move(dt);
+      if (this.reel.active !== null) this.payOut();
     }
     const speed = Math.hypot(d.vx, d.vy);
     d.moving = speed > 0.4;
@@ -233,7 +305,6 @@
     d.anim += dt * (0.8 + speed * 0.9);
 
     this.stir(dt, speed);
-    this.laySpool();
 
     this.siltClock += dt;
     while (this.siltClock >= SILT_TICK) { this.siltClock -= SILT_TICK; this.stepSilt(); }
@@ -393,7 +464,10 @@
     const i = this.idx(d.x, d.y);
     const ed = dive.exitDist[i];
     if (isFinite(ed)) this.pen = ed * C.CELL_M;
-    if (!this.entered && this.pen > 8) { this.entered = true; this.event('enter', 'Left the daylight of the entrance pool.'); }
+    if (!this.entered && this.pen > 8) {
+      this.entered = true;
+      this.event('enter', this.reel.active !== null && this.connected(this.reel.active) ? 'Left the daylight of the pool, laying line.' : 'Left the daylight of the pool without a line tied in.');
+    }
     if (this.pen > this.maxPen.m) {
       if (this.flags.turned) { this.flags.turned = false; this.event('back_in', 'Headed further in again after turning.'); }
       this.maxPen = { m: this.pen, t: this.t, gas: this.gas };
@@ -404,7 +478,7 @@
     if (before > B.turn && this.gas <= B.turn) {
       this.flags.turnAt = { t: this.t, pen: this.pen };
       this.event('turn_pressure', `Reached turn pressure (${Math.round(B.turn)} bar) ${Math.round(this.pen)} m in.`);
-      this.toast(`Turn pressure: ${Math.round(B.turn)} bar. Time to head out.`, 5);
+      this.toast(`Turn pressure: ${Math.round(B.turn)} bar. Time to follow your line out.`, 5);
     }
     if (before > B.reserve && this.gas <= B.reserve) {
       this.event('reserve', `Breathing into the reserve third, ${Math.round(this.pen)} m from the entrance.`);
@@ -421,12 +495,22 @@
       e.t = at.t; e.late = late; e.after = late ? at.t - this.flags.turnAt.t : 0; e.gas = Math.round(at.gas); e.pen = Math.round(this.maxPen.m);
     }
 
+    // Dead ends.
+    for (let k = 0; k < dive.deadEnds.length; k++) {
+      const de = dive.deadEnds[k];
+      if (!this.deadEndsSeen.has(k) && Math.hypot(d.x - de.x, d.y - de.y) < de.r + 1.5) {
+        this.deadEndsSeen.add(k);
+        this.event('dead_end', `Reached a dead end ${Math.round(this.pen)} m in.`);
+        this.toast('Dead end.', 2.5);
+      }
+    }
+
     // Visibility episodes.
     if (vis < ZERO_VIS) {
       this.zeroVisTime += dt;
       if (!this.flags.zeroSince) {
         this.flags.zeroSince = this.t;
-        const own = this.oldestStirNear(d.x, d.y, 2.5, 12);
+        const own = this.tutorial ? -1 : this.oldestStirNear(d.x, d.y, 2.5, 12);
         this.event('zero_vis', own >= 0 ? `Swam back into the silt you stirred up at ${fmt(own)}.` : 'Visibility dropped to almost nothing.');
         if (own >= 0) this.log[this.log.length - 1].own = own;
       }
@@ -445,43 +529,61 @@
       this.blindNoLine = 0;
     }
 
-    // Markers are read by touch.
+    // Swimming away from every line, with no reel running.
+    const laying = this.reel.active !== null;
+    const near = laying || this.hold ? null : this.nearestLine(d.x, d.y, 4);
+    if (!laying && !this.hold && !near && this.pen > 10) {
+      if (!this.flags.offLineSince) {
+        this.flags.offLineSince = this.t;
+        this.event('no_line', this.lines.length ? `Swam away from your line, ${Math.round(this.pen)} m in.` : `Swimming into the cave with no line at all, ${Math.round(this.pen)} m in.`);
+      }
+    } else if (this.flags.offLineSince && (laying || this.hold || this.nearestLine(d.x, d.y, 2))) {
+      this.flags.offLineSince = 0;
+    }
+
+    // Which way the line under the hand runs back.
     this.felt = null;
     if (this.hold) {
-      for (const m of dive.markers) {
-        if (this.lines[m.line] === this.lines[this.hold.line] && Math.abs(m.s - this.hold.s) < 1.6) { this.felt = m; break; }
-      }
+      const p = Gen.linePoint(this.lines[this.hold.line], this.hold.s);
+      this.felt = { x: p.x, y: p.y, ex: p.ex, ey: p.ey, out: this.connected(this.hold.line) };
     }
 
     if (!this.goalTagged && Math.hypot(d.x - dive.goal.x, d.y - dive.goal.y) < 3.2) {
       this.goalTagged = true;
-      this.event('goal', `Reached the end of the line and tagged it, ${Math.round(this.pen)} m in.`);
-      this.toast('End of the line: tagged. Now get yourself home.', 5);
+      this.event('goal', `Reached the end chamber and tagged it, ${Math.round(this.pen)} m in.`);
+      this.toast(this.tutorial ? 'You made it to the end chamber.' : 'End chamber: tagged. Now follow your line home.', 5);
     }
-    for (const l of this.leads) {
-      if (!l.surveyed && l.reachable && Math.hypot(d.x - l.x, d.y - l.y) < 3.5) {
-        l.surveyed = true;
-        this.event('lead', `Surveyed an unexplored lead${l.extraBar ? ` (about ${Math.round(l.extraBar)} bar off the main line)` : ''}.`);
-        this.toast('Surveyed an unexplored lead.', 3.5);
-      }
+
+    // Tutorial steps.
+    const tu = this.tutorial;
+    if (tu && tu.step < tu.steps.length - 1 && tu.steps[tu.step].done(this)) {
+      tu.step++;
+      const next = tu.steps[tu.step];
+      if (next.enter) next.enter(this);
+      this.event('tutorial', `Tutorial step ${tu.step + 1}: ${next.text}`);
     }
 
     if (this.gas <= 0) return this.finish('out_of_gas');
-    if (this.entered && this.inExitZone()) return this.finish('exit');
+    if (this.entered && this.inExitZone()) {
+      if (tu && tu.step < tu.steps.length - 1) {
+        if (this.t - (this.flags.tutorialNag || -9) > 4) { this.flags.tutorialNag = this.t; this.toast('Finish the tutorial steps first: head back into the cave.'); }
+      } else {
+        return this.finish('exit');
+      }
+    }
   };
 
   Game.prototype.finish = function (outcome) {
-    const surveyed = this.leads.filter((l) => l.surveyed).length;
     if (outcome === 'exit') this.event('exit', `Back in the entrance pool with ${Math.round(this.gas)} bar.`);
     else this.event('out_of_gas', `Ran out of gas ${Math.round(this.pen)} m from the entrance.`);
-    const score = outcome === 'exit' ? (this.goalTagged ? 100 : 30) + surveyed * 25 + Math.round(this.gas / 4) : 0;
-    this.done = { outcome, goal: this.goalTagged, surveyed, leads: this.leads.filter((l) => l.reachable).length, time: this.t, gas: this.gas, score };
+    const score = outcome === 'exit' ? (this.goalTagged ? 100 : 30) + Math.round(this.gas / 4) : 0;
+    this.done = { outcome, goal: this.goalTagged, time: this.t, gas: this.gas, score, tutorial: !!this.tutorial, deadEnds: this.deadEndsSeen.size };
   };
 
   Game.prototype.abort = function () {
     if (!this.done) {
       this.event('abort', 'Ended the dive from the menu.');
-      this.done = { outcome: 'abort', goal: this.goalTagged, surveyed: 0, leads: this.leads.length, time: this.t, gas: this.gas, score: 0 };
+      this.done = { outcome: 'abort', goal: this.goalTagged, time: this.t, gas: this.gas, score: 0, tutorial: !!this.tutorial, deadEnds: this.deadEndsSeen.size };
     }
   };
 
@@ -491,7 +593,8 @@
     const res = this.done, B = this.d.budget, log = this.log;
     const find = (type) => log.find((e) => e.type === type);
     let headline;
-    if (res.outcome === 'exit') headline = res.goal ? `Home safe with ${Math.round(res.gas)} bar, end of the line tagged.` : `Home safe with ${Math.round(res.gas)} bar. You turned back before the end of the line.`;
+    if (res.tutorial && res.outcome === 'exit') headline = 'You laid a line in, tied it off, and followed it out blind.';
+    else if (res.outcome === 'exit') headline = res.goal ? `Home safe with ${Math.round(res.gas)} bar, end chamber tagged.` : `Home safe with ${Math.round(res.gas)} bar. You turned back before finding the end chamber.`;
     else if (res.outcome === 'out_of_gas') headline = `You ran out of gas ${Math.round(this.pen)} m from the entrance.`;
     else headline = 'Dive ended early.';
 
@@ -499,26 +602,30 @@
     const tp = find('turn_pressure'), turned = log.filter((e) => e.type === 'turned').pop();
     if (turned && turned.late) notes.push(`You stayed in for ${Math.round(turned.after)} s after reaching turn pressure. Everything past that point came out of the gas meant for getting home.`);
     else if (!turned && tp && res.outcome === 'out_of_gas') notes.push(`You never turned for home. Turn pressure came at ${fmt(tp.t)}, ${tp.pen} m in.`);
-    else if (turned && !tp && res.outcome === 'exit') notes.push('You turned before using a third of your gas: the rule of thirds kept a full reserve for the way out.');
+    else if (turned && !tp && res.outcome === 'exit' && !res.tutorial) notes.push('You turned before using a third of your gas: the rule of thirds kept a full reserve for the way out.');
+    const firstTie = find('tie_in');
+    if (!firstTie && this.entered) notes.push('You never tied a line in. In a maze, the line you lay is the only sure way back.');
+    else if (firstTie && !this.lines.some((l) => l.anchored)) notes.push('None of your lines was tied in at the pool, so none of them could lead you all the way out.');
+    const offLine = find('no_line');
+    if (offLine && res.outcome === 'out_of_gas') notes.push(`At ${fmt(offLine.t)} you swam away from your line. From there on you were finding the way out from memory.`);
     const own = log.find((e) => e.type === 'zero_vis' && e.own !== undefined);
     if (own) notes.push(`The silt you kicked up at ${fmt(own.own)} was still hanging there at ${fmt(own.t)}, when you came back through.`);
     const lost = find('lost');
-    if (lost) notes.push(`At ${fmt(lost.t)} you were in the silt with no hand on any line. Without the line, the only reliable way out is gone.`);
+    if (lost && !res.tutorial) notes.push(`At ${fmt(lost.t)} you were in the silt with no hand on any line.`);
+    if (res.deadEnds >= 2) notes.push(`You swam into ${res.deadEnds} dead ends. Each wrong turn is paid for twice, in and back out.`);
     if (this.gasHard > 8) notes.push(`Hard kicking cost about ${Math.round(this.gasHard)} bar and stirred up far more silt than a gentle kick.`);
     if (this.gasStress > 6) notes.push(`Stress breathing in squeezes and zero visibility cost about ${Math.round(this.gasStress)} bar.`);
     if (this.bumps >= 3) notes.push(`You hit the rock ${this.bumps} times. Each hit puts a cloud of silt in the water.`);
-    const leadsTaken = log.filter((e) => e.type === 'lead').length;
-    if (leadsTaken && res.outcome === 'out_of_gas') notes.push('The side leads were tempting, but each one was paid for out of the gas meant for the way home.');
-    if (res.outcome === 'out_of_gas' && !notes.length) notes.push(`The dive plan gave you ${Math.round(B.turn)} bar as a turn pressure. Turning there always leaves enough gas to get out, even following the line blind.`);
-    if (res.outcome === 'exit' && !notes.length) notes.push('Clean dive: on the line, within your thirds, and out with gas to spare.');
+    if (res.outcome === 'out_of_gas' && !notes.length) notes.push(`Turning at ${Math.round(B.turn)} bar with a line back to the pool always leaves enough gas to follow it out, even blind.`);
+    if (res.outcome === 'exit' && !notes.length && !res.tutorial) notes.push('Clean dive: a line all the way from the pool, within your thirds, and out with gas to spare.');
 
-    const keep = ['start', 'enter', 'turn_pressure', 'goal', 'lead', 'turned', 'back_in', 'zero_vis', 'lost', 'found', 'let_go', 'switch', 'spool_on', 'spool_off', 'reserve', 'bump', 'exit', 'out_of_gas', 'abort'];
+    const keep = ['start', 'tie_in', 'enter', 'dead_end', 'turn_pressure', 'goal', 'tie_off', 'reel_empty', 'turned', 'back_in', 'no_line', 'zero_vis', 'lost', 'found', 'let_go', 'switch', 'reserve', 'bump', 'exit', 'out_of_gas', 'abort'];
     const timeline = log.filter((e) => keep.includes(e.type)).sort((a, b) => a.t - b.t)
       .map((e) => ({ t: fmt(e.t), text: e.text, type: e.type }));
-    return { headline, notes, timeline, stats: { time: fmt(res.time), maxPen: Math.round(this.maxPen.m), zeroVis: Math.round(this.zeroVisTime), gas: Math.round(res.gas), score: res.score } };
+    return { headline, notes, timeline, stats: { time: fmt(res.time), maxPen: Math.round(this.maxPen.m), zeroVis: Math.round(this.zeroVisTime), gas: Math.round(res.gas), score: res.score, laid: Math.round(this.laidMetres()) } };
   };
 
-  const api = { Game, fmt, SPOOL_CELLS, ZERO_VIS, REACH };
+  const api = { Game, fmt, ZERO_VIS, REACH, TUTORIAL };
   root.CaveGame = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
